@@ -742,26 +742,10 @@ export function AnnotationModal() {
     <div className="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center">
       {/* Floating toolbar + layers outside modal */}
       <div className="pointer-events-none fixed inset-x-0 top-4 z-[120] flex items-start justify-center px-16">
-        {/* Done / Cancel actions */}
-        <div className="pointer-events-auto flex items-center gap-2">
-          <button
-            onClick={handleDone}
-            className="px-3 py-1.5 text-xs font-medium rounded-xl bg-background-flora-green-primary text-text-positive-on-accent hover:bg-background-flora-green-secondary"
-          >
-            Done
-          </button>
-          <button
-            onClick={closeModal}
-            className="px-3 py-1.5 text-xs font-medium rounded-xl text-text-2 hover:text-text-1 hover:bg-white/5"
-          >
-            Cancel
-          </button>
-        </div>
-
-        {/* Toolbar - centered above canvas, FloatingActionBar style */}
+        {/* Toolbar - centered above canvas, FloatingActionBar style (canvas preset + Done / Cancel) */}
         <div className="pointer-events-auto flex-1 flex justify-center">
           <div
-            className="flex items-center gap-1 rounded-full px-2 py-1 backdrop-blur-[16px]"
+            className="flex items-center gap-2 rounded-full px-2 py-1 backdrop-blur-[16px]"
             style={{ backgroundColor: "var(--background-transparent-black-default)" }}
           >
             {/* Canvas aspect ratio dropdown */}
@@ -812,110 +796,78 @@ export function AnnotationModal() {
               )}
             </div>
 
+            {/* Divider */}
             <div className="mx-1 h-4 w-px bg-border-transparent" />
 
+            {/* Done / Cancel actions inside the pill */}
             <button
-              onClick={undo}
-              className="flex h-8 items-center justify-center rounded-xl px-3 text-xs text-icon-2 hover:bg-white/5"
+              onClick={handleDone}
+              className="px-3 py-1.5 text-xs font-medium rounded-xl bg-background-flora-green-primary text-text-positive-on-accent hover:bg-background-flora-green-secondary"
             >
-              Undo
+              Done
             </button>
             <button
-              onClick={redo}
-              className="flex h-8 items-center justify-center rounded-xl px-3 text-xs text-icon-2 hover:bg-white/5"
+              onClick={closeModal}
+              className="px-3 py-1.5 text-xs font-medium rounded-xl text-text-2 hover:text-text-1 hover:bg-white/5"
             >
-              Redo
+              Cancel
             </button>
-
-            <div className="mx-1 h-4 w-px bg-border-transparent" />
-
-            <button
-              onClick={clearAnnotations}
-              className="flex h-8 items-center justify-center rounded-xl px-3 text-xs text-danger-secondary hover:bg-danger-secondary/80"
-            >
-              Clear
-            </button>
-
-            <div className="mx-1 h-4 w-px bg-border-transparent" />
-
-            <button
-              onClick={() => selectedLayerId && copyLayers([selectedLayerId])}
-              disabled={!selectedLayerId}
-              className="flex h-8 w-8 items-center justify-center rounded-xl text-icon-2 hover:bg-white/5 disabled:opacity-40"
-              title="Copy (Ctrl+C)"
-            >
-              <Copy className="w-3.5 h-3.5" />
-            </button>
-            <button
-              onClick={pasteLayers}
-              disabled={clipboard.length === 0}
-              className="flex h-8 w-8 items-center justify-center rounded-xl text-icon-2 hover:bg-white/5 disabled:opacity-40"
-              title="Paste (Ctrl+V)"
-            >
-              <Clipboard className="w-3.5 h-3.5" />
-            </button>
-
-            <div className="mx-1 h-4 w-px bg-border-transparent" />
-
-            <div className="flex items-center gap-0.5" title="Align to canvas">
-              <button
-                onClick={() => alignSelected("left", stageSize.width, stageSize.height)}
-                disabled={!selectedLayerId}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[10px] font-medium text-text-3 hover:bg-white/5 hover:text-text-1 disabled:opacity-40"
-                title="Align left"
-              >
-                L
-              </button>
-              <button
-                onClick={() => alignSelected("center", stageSize.width, stageSize.height)}
-                disabled={!selectedLayerId}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[10px] font-medium text-text-3 hover:bg-white/5 hover:text-text-1 disabled:opacity-40"
-                title="Align center"
-              >
-                C
-              </button>
-              <button
-                onClick={() => alignSelected("right", stageSize.width, stageSize.height)}
-                disabled={!selectedLayerId}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[10px] font-medium text-text-3 hover:bg-white/5 hover:text-text-1 disabled:opacity-40"
-                title="Align right"
-              >
-                R
-              </button>
-              <button
-                onClick={() => alignSelected("top", stageSize.width, stageSize.height)}
-                disabled={!selectedLayerId}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[10px] font-medium text-text-3 hover:bg-white/5 hover:text-text-1 disabled:opacity-40"
-                title="Align top"
-              >
-                T
-              </button>
-              <button
-                onClick={() => alignSelected("middle", stageSize.width, stageSize.height)}
-                disabled={!selectedLayerId}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[10px] font-medium text-text-3 hover:bg-white/5 hover:text-text-1 disabled:opacity-40"
-                title="Align middle"
-              >
-                M
-              </button>
-              <button
-                onClick={() => alignSelected("bottom", stageSize.width, stageSize.height)}
-                disabled={!selectedLayerId}
-                className="flex h-7 w-7 items-center justify-center rounded-md text-[10px] font-medium text-text-3 hover:bg-white/5 hover:text-text-1 disabled:opacity-40"
-                title="Align bottom"
-              >
-                B
-              </button>
-            </div>
           </div>
         </div>
 
-        {/* Layer Panel - right, FloatingActionBar style shell */}
+        {/* Layer Panel - right, FloatingActionBar style shell, with edit actions above */}
         {unifiedLayers.length > 0 && (
           <aside
             className="pointer-events-auto ml-auto flex flex-col gap-2 rounded-2xl border border-border-transparent-secondary bg-background-transparent-black p-2 f-effect-backdrop-blur-lg"
             style={{ backgroundColor: "var(--background-transparent-black-default)" }}
           >
+            {/* Edit actions: Undo / Redo / Clear / Copy / Paste */}
+            <div
+              className="flex items-center gap-1 rounded-full px-2 py-1 backdrop-blur-[16px]"
+              style={{ backgroundColor: "var(--background-transparent-black-default)" }}
+            >
+              <button
+                onClick={undo}
+                className="flex h-8 items-center justify-center rounded-xl px-3 text-xs text-icon-2 hover:bg-white/5"
+              >
+                Undo
+              </button>
+              <button
+                onClick={redo}
+                className="flex h-8 items-center justify-center rounded-xl px-3 text-xs text-icon-2 hover:bg-white/5"
+              >
+                Redo
+              </button>
+
+              <div className="mx-1 h-4 w-px bg-border-transparent" />
+
+              <button
+                onClick={clearAnnotations}
+                className="flex h-8 items-center justify-center rounded-xl px-3 text-xs text-danger-secondary hover:bg-danger-secondary/80"
+              >
+                Clear
+              </button>
+
+              <div className="mx-1 h-4 w-px bg-border-transparent" />
+
+              <button
+                onClick={() => selectedLayerId && copyLayers([selectedLayerId])}
+                disabled={!selectedLayerId}
+                className="flex h-8 w-8 items-center justify-center rounded-xl text-icon-2 hover:bg-white/5 disabled:opacity-40"
+                title="Copy (Ctrl+C)"
+              >
+                <Copy className="w-3.5 h-3.5" />
+              </button>
+              <button
+                onClick={pasteLayers}
+                disabled={clipboard.length === 0}
+                className="flex h-8 w-8 items-center justify-center rounded-xl text-icon-2 hover:bg-white/5 disabled:opacity-40"
+                title="Paste (Ctrl+V)"
+              >
+                <Clipboard className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
             <div className="bg-dark-1 rounded-2xl border border-border-alpha-light-1 overflow-hidden min-h-fit w-full f-effect-backdrop-blur-lg flex flex-col">
               {/* Header row: LAYERS + zoom like "LAYERS - 100% +" */}
               <div className="px-2 py-1.5 border-b border-border-alpha-light-1 flex items-center justify-between gap-2 bg-dark-1">
@@ -1062,7 +1014,7 @@ export function AnnotationModal() {
       {/* Left floating tool palette outside modal, fixed to viewport left-center, matching FloatingActionBar style */}
       <aside
         ref={floatingDropdownRef}
-        className="fixed left-4 top-1/2 z-10 flex -translate-y-1/2 flex-col items-center gap-2 rounded-full p-2 backdrop-blur-[16px]"
+        className="fixed left-4 top-1/2 z-[120] flex -translate-y-1/2 flex-col items-center gap-2 rounded-full p-2 backdrop-blur-[16px]"
         style={{ backgroundColor: "var(--background-transparent-black-default)" }}
         data-id="annotation-floating-toolbar"
       >
