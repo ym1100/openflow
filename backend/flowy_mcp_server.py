@@ -50,6 +50,7 @@ def get_canvas_state() -> Dict[str, Any]:
 def _heuristic_plan_edits(
     message: str,
     workflow_state: Optional[Dict[str, Any]] = None,
+    selected_node_ids: Optional[List[str]] = None,
 ) -> Tuple[str, List[Dict[str, Any]]]:
     """
     MVP planner (heuristic):
@@ -60,6 +61,8 @@ def _heuristic_plan_edits(
 
     message_l = (message or "").lower()
     nodes = (workflow_state or {}).get("nodes") or []
+    edges = (workflow_state or {}).get("edges") or []
+    selected_node_ids = selected_node_ids or []
 
     # Basic geometry defaults
     max_x = 0
@@ -73,21 +76,20 @@ def _heuristic_plan_edits(
 
     is_empty = len(nodes) == 0
 
-    clear_intents = ["clear", "reset", "delete all", "remove all", "wipe", "start over"]
-    if any(k in message_l for k in clear_intents):
-        operations = [{"type": "removeNode", "nodeId": n["id"]} for n in nodes if "id" in n]
-        explanation = "Clearing the canvas."
-        return explanation, operations
+    nodes_by_id: Dict[str, Any] = {n.get("id"): n for n in nodes if n.get("id")}
 
-    # If non-empty and we already have a prompt node, just update it.
-    if not is_empty and "prompt" in {n.get("type") for n in nodes}:
-        prompt_nodes = [n for n in nodes if n.get("type") == "prompt" and n.get("id")]
+    selected_set = set(selected_node_ids)
+
+    def _update_prompt_nodes(prompt_ids: List[str]) -> Tuple[str, List[Dict[str, Any]]]:
+        prompt_ids = [pid for pid in prompt_ids if pid in nodes_by_id]
+        if not prompt_ids:
+            return ("No matching prompt nodes to update.", [])
         operations: List[Dict[str, Any]] = []
-        for pn in prompt_nodes:
+        for pid in prompt_ids:
             operations.append(
                 {
                     "type": "updateNode",
-                    "nodeId": pn["id"],
+                    "nodeId": pid,
                     "data": {
                         "prompt": message,
                         "customTitle": (
@@ -98,7 +100,58 @@ def _heuristic_plan_edits(
                     },
                 }
             )
-        return "Updating existing prompt node(s) with your request.", operations
+        return ("Updating selected prompt node(s).", operations)
+
+    # If the user selected nodes, prefer updating the prompt nodes that connect to them.
+    if selected_set:
+        selected_prompt_ids = [
+            nid
+            for nid in selected_node_ids
+            if nodes_by_id.get(nid, {}).get("type") == "prompt" and nodes_by_id.get(nid, {}).get("id")
+        ]
+        if selected_prompt_ids:
+            return _update_prompt_nodes(selected_prompt_ids)
+
+        # If selected includes generate nodes, update their connected prompt(s) (prompt.text -> generate.*.text)
+        target_prompt_ids: List[str] = []
+        for e in edges:
+            try:
+                if (
+                    e.get("target") in selected_set
+                    and e.get("targetHandle") == "text"
+                    and nodes_by_id.get(e.get("source"), {}).get("type") == "prompt"
+                ):
+                    target_prompt_ids.append(e.get("source"))
+            except Exception:
+                continue
+        if target_prompt_ids:
+            return _update_prompt_nodes(list(dict.fromkeys(target_prompt_ids)))
+
+        # If selected includes image input nodes, update prompts receiving image (image -> prompt.image).
+        image_to_prompt_prompt_ids: List[str] = []
+        for e in edges:
+            try:
+                if (
+                    e.get("source") in selected_set
+                    and e.get("targetHandle") == "image"
+                    and nodes_by_id.get(e.get("target"), {}).get("type") == "prompt"
+                ):
+                    image_to_prompt_prompt_ids.append(e.get("target"))
+            except Exception:
+                continue
+        if image_to_prompt_prompt_ids:
+            return _update_prompt_nodes(list(dict.fromkeys(image_to_prompt_prompt_ids)))
+
+    clear_intents = ["clear", "reset", "delete all", "remove all", "wipe", "start over"]
+    if any(k in message_l for k in clear_intents):
+        operations = [{"type": "removeNode", "nodeId": n["id"]} for n in nodes if "id" in n]
+        explanation = "Clearing the canvas."
+        return explanation, operations
+
+    # If non-empty and we already have a prompt node, just update it.
+    if not is_empty and "prompt" in {n.get("type") for n in nodes}:
+        prompt_nodes = [n for n in nodes if n.get("type") == "prompt" and n.get("id")]
+        return _update_prompt_nodes([pn["id"] for pn in prompt_nodes])
 
     # Otherwise build a new chain near the right side.
     x0 = max_x + 260
@@ -211,6 +264,7 @@ def apply_edit_operations(operations: List[Dict[str, Any]]) -> Dict[str, Any]:
 def plan_edits(
     message: str,
     workflow_state: Optional[Dict[str, Any]] = None,
+    selected_node_ids: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Plan edit operations for the canvas.
@@ -221,7 +275,11 @@ def plan_edits(
     - Returns `requiresApproval: true` so callers can gate apply actions.
     """
 
-    explanation, operations = _heuristic_plan_edits(message=message, workflow_state=workflow_state)
+    explanation, operations = _heuristic_plan_edits(
+        message=message,
+        workflow_state=workflow_state,
+        selected_node_ids=selected_node_ids,
+    )
     return {
         "assistantText": explanation,
         "operations": operations,

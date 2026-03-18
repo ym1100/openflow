@@ -72,6 +72,17 @@ export function FlowyAgentPanel({
     };
   }, [workflowState]);
 
+  const selectedContextSummary = useMemo(() => {
+    const ids = selectedNodeIds ?? [];
+    if (!workflowState || ids.length === 0) return null;
+    const types = workflowState.nodes
+      .filter((n) => ids.includes(n.id))
+      .map((n) => n.type)
+      .filter(Boolean);
+    const unique = Array.from(new Set(types));
+    return { count: ids.length, types: unique.slice(0, 4) };
+  }, [selectedNodeIds, workflowState]);
+
   const scrollToBottom = useCallback(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, []);
@@ -277,6 +288,14 @@ export function FlowyAgentPanel({
         onWheelCapture={(e) => e.stopPropagation()}
         style={{ touchAction: "pan-y" }}
       >
+        {selectedContextSummary && (
+          <div className="bg-neutral-700/50 border border-neutral-600 rounded-lg px-3 py-2 text-xs text-neutral-300">
+            Using your selected node context ({selectedContextSummary.count} selected):
+            {" "}
+            {selectedContextSummary.types.length ? selectedContextSummary.types.join(", ") : "nodes"}
+          </div>
+        )}
+
         {errorMessage && (
           <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-sm text-red-200">
             {errorMessage}

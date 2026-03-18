@@ -19,12 +19,17 @@ def main() -> None:
     payload = _read_stdin_json()
     message = payload.get("message") or ""
     workflow_state = payload.get("workflowState") or payload.get("workflow_state")
+    selected_node_ids = payload.get("selectedNodeIds") or payload.get("selected_node_ids") or []
 
     # Import planner from our MCP server module (keeps heuristics in one place).
     # This is safe: the FastMCP server only runs under __main__.
     from flowy_mcp_server import _heuristic_plan_edits
 
-    explanation, operations = _heuristic_plan_edits(message=message, workflow_state=workflow_state)
+    explanation, operations = _heuristic_plan_edits(
+        message=message,
+        workflow_state=workflow_state,
+        selected_node_ids=selected_node_ids,
+    )
 
     response = {
         "assistantText": explanation,
