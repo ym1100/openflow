@@ -561,6 +561,18 @@ export function ConnectionDropMenu({
   const menuRef = useRef<HTMLDivElement>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
 
+  const panelClassName =
+    "fixed z-[200] w-80 max-w-80 rounded-xl border border-neutral-700/40 bg-[var(--background-transparent-black-default)] backdrop-blur-lg overflow-hidden outline-none";
+
+  const sectionTitleClassName =
+    "select-none px-3 py-2 text-[11px] text-neutral-400";
+
+  const rowClassName =
+    "w-full rounded-lg px-4 pl-2 flex h-[51px] justify-start gap-2 whitespace-normal bg-transparent font-normal text-[12px] text-neutral-200 hover:bg-white/10 transition-colors items-center text-left";
+
+  const iconTileClassName =
+    "flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-950/60 p-2 text-neutral-300";
+
   // Get the appropriate node options based on handle type and connection direction
   const getOptions = useCallback((): MenuOption[] => {
     if (!handleType) return [];
@@ -637,42 +649,32 @@ export function ConnectionDropMenu({
     <div
       ref={menuRef}
       tabIndex={-1}
-      className="fixed z-100 bg-neutral-800 border border-neutral-600 rounded-lg shadow-xl overflow-hidden min-w-[160px] outline-none"
+      className={panelClassName}
       style={{
         left: position.x,
         top: position.y,
         transform: "translate(-50%, -50%)",
       }}
     >
-      <div className="px-2 py-1.5 border-b border-neutral-700">
-        <span className="text-[10px] text-neutral-400 uppercase tracking-wide">
+      <div className="flex flex-col px-1 py-1">
+        <div className={sectionTitleClassName}>
           Add {handleType} node
-        </span>
+        </div>
       </div>
-      <div className="py-1">
+      <div className="px-1 py-1 max-h-[320px] overflow-y-auto">
         {options.map((option, index) => (
           <button
             key={option.type}
             onClick={() => onSelect({ type: option.type, isAction: option.isAction || false })}
             onMouseEnter={() => setSelectedIndex(index)}
-            className={`w-full px-3 py-2 text-left text-[11px] font-medium flex items-center gap-2 transition-colors ${
-              index === selectedIndex
-                ? "bg-neutral-700 text-neutral-100"
-                : "text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100"
-            }`}
+            className={`${rowClassName} ${index === selectedIndex ? "bg-white/10" : ""}`}
           >
-            {option.icon}
-            {option.label}
+            <div className={iconTileClassName}>{option.icon}</div>
+            <div className="relative flex h-8 items-center text-left">
+              <span className="select-none truncate">{option.label}</span>
+            </div>
           </button>
         ))}
-      </div>
-      <div className="px-2 py-1.5 border-t border-neutral-700 flex items-center justify-between">
-        <span className="text-[9px] text-neutral-500">
-          <kbd className="px-1 py-0.5 bg-neutral-700 rounded text-[8px]">↑↓</kbd> navigate
-        </span>
-        <span className="text-[9px] text-neutral-500">
-          <kbd className="px-1 py-0.5 bg-neutral-700 rounded text-[8px]">↵</kbd> select
-        </span>
       </div>
     </div>
   );
