@@ -218,7 +218,7 @@ describe("AnnotationNode", () => {
   });
 
   describe("Edit Button / Image Click", () => {
-    it("should show 'Edit layers' hint when no annotations exist", () => {
+    it("should open annotation modal when toolbar edit button is clicked", () => {
       render(
         <TestWrapper>
           <AnnotationNode {...createNodeProps({
@@ -228,42 +228,14 @@ describe("AnnotationNode", () => {
         </TestWrapper>
       );
 
-      expect(screen.getByText("Edit layers")).toBeInTheDocument();
-    });
-
-    it("should show layer count when annotations exist", () => {
-      render(
-        <TestWrapper>
-          <AnnotationNode {...createNodeProps({
-            sourceImage: "data:image/png;base64,test",
-            annotations: [
-              { id: "1", type: "rectangle", x: 0, y: 0, width: 100, height: 100, stroke: "#ff0000", strokeWidth: 2, opacity: 1, fill: null },
-              { id: "2", type: "rectangle", x: 50, y: 50, width: 100, height: 100, stroke: "#00ff00", strokeWidth: 2, opacity: 1, fill: null },
-            ],
-          })} />
-        </TestWrapper>
-      );
-
-      expect(screen.getByText("Edit layers (2)")).toBeInTheDocument();
-    });
-
-    it("should open annotation modal when image is clicked", () => {
-      render(
-        <TestWrapper>
-          <AnnotationNode {...createNodeProps({
-            sourceImage: "data:image/png;base64,test",
-            annotations: [],
-          })} />
-        </TestWrapper>
-      );
-
-      const img = screen.getByAltText("Annotated");
-      fireEvent.click(img.parentElement!);
+      const editButton = screen.getByRole("button", { name: "Edit layers" });
+      fireEvent.click(editButton);
 
       expect(mockOpenModal).toHaveBeenCalledWith(
         "test-annotation-1",
-        "data:image/png;base64,test",
-        []
+        ["data:image/png;base64,test"],
+        [],
+        undefined
       );
     });
 
@@ -281,13 +253,14 @@ describe("AnnotationNode", () => {
         </TestWrapper>
       );
 
-      const img = screen.getByAltText("Annotated");
-      fireEvent.click(img.parentElement!);
+      const editButton = screen.getByRole("button", { name: "Edit layers" });
+      fireEvent.click(editButton);
 
       expect(mockOpenModal).toHaveBeenCalledWith(
         "test-annotation-1",
-        "data:image/png;base64,test",
-        annotations
+        ["data:image/png;base64,test"],
+        annotations,
+        undefined
       );
     });
 

@@ -7,7 +7,6 @@ import {
   getBezierPath,
 } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
-import { getSharedGradientId } from "./SharedEdgeGradients";
 
 export function ReferenceEdge({
   id,
@@ -42,14 +41,19 @@ export function ReferenceEdge({
     });
   }, [sourceX, sourceY, sourcePosition, targetX, targetY, targetPosition]);
 
-  // Reference shared gradient by selection state
-  const gradientId = useMemo(() => {
-    const selectionKey = isConnectedToSelection ? "active" : "dimmed";
-    return getSharedGradientId("reference", selectionKey);
-  }, [isConnectedToSelection]);
+  // Per-edge gradient defs (must live in the same SVG as the path)
+  const gradientId = useMemo(() => `edge-grad-${id}`, [id]);
+  const gradientOpacity = isConnectedToSelection ? { a: 1, mid: 0.55 } : { a: 0.25, mid: 0.1 };
 
   return (
     <>
+      <defs>
+        <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor="#52525b" stopOpacity={gradientOpacity.a} />
+          <stop offset="50%" stopColor="#52525b" stopOpacity={gradientOpacity.mid} />
+          <stop offset="100%" stopColor="#52525b" stopOpacity={gradientOpacity.a} />
+        </linearGradient>
+      </defs>
       <BaseEdge
         id={id}
         path={edgePath}

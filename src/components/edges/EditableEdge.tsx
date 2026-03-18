@@ -10,7 +10,6 @@ import {
 } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { NanoBananaNodeData, WorkflowEdgeData } from "@/types";
-import { getSharedGradientId } from "./SharedEdgeGradients";
 
 interface EdgeData extends WorkflowEdgeData {
   offsetX?: number;
@@ -81,19 +80,9 @@ export function EditableEdge({
     return EDGE_COLORS[normalizedType] || EDGE_COLORS.default;
   }, [hasPause, sourceHandleId, targetHandleId]);
 
-  // Reference shared gradient by color key + selection state
-  const gradientId = useMemo(() => {
-    if (hasPause) {
-      const selectionKey = isConnectedToSelection ? "active" : "dimmed";
-      return getSharedGradientId("pause", selectionKey);
-    }
-    const handleType = sourceHandleId || targetHandleId || "default";
-    const normalizedType = handleType.replace(/-\d+$/, "");
-    // Use the normalized type if it exists in EDGE_COLORS, otherwise fall back to "default"
-    const colorKey = normalizedType in EDGE_COLORS ? normalizedType : "default";
-    const selectionKey = isConnectedToSelection ? "active" : "dimmed";
-    return getSharedGradientId(colorKey, selectionKey);
-  }, [hasPause, sourceHandleId, targetHandleId, isConnectedToSelection]);
+  // Per-edge gradient defs (must live in the same SVG as the path)
+  const gradientId = useMemo(() => `edge-grad-${id}`, [id]);
+  const gradientOpacity = isConnectedToSelection ? { a: 1, mid: 0.55 } : { a: 0.25, mid: 0.1 };
 
   // Calculate the path based on edge style
   const [edgePath, labelX, labelY] = useMemo(() => {
@@ -188,6 +177,13 @@ export function EditableEdge({
 
   return (
     <>
+      <defs>
+        <linearGradient id={gradientId} x1="0%" y1="0%" x2="100%" y2="0%">
+          <stop offset="0%" stopColor={edgeColor} stopOpacity={gradientOpacity.a} />
+          <stop offset="50%" stopColor={edgeColor} stopOpacity={gradientOpacity.mid} />
+          <stop offset="100%" stopColor={edgeColor} stopOpacity={gradientOpacity.a} />
+        </linearGradient>
+      </defs>
       <BaseEdge
         id={id}
         path={edgePath}

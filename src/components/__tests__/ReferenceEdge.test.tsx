@@ -115,10 +115,9 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      // Edges now reference shared gradient IDs instead of per-edge defs
-      const basePath = container.querySelector(".react-flow__edge-path");
-      const stroke = basePath?.getAttribute("style") ?? "";
-      expect(stroke).toContain("edge-grad-reference-");
+      const gradientStop = container.querySelector("linearGradient stop");
+      expect(gradientStop).toBeInTheDocument();
+      expect(gradientStop?.getAttribute("stop-color")).toBe("#52525b");
     });
   });
 
@@ -166,10 +165,9 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      // Should reference the "active" shared gradient
-      const basePath = container.querySelector(".react-flow__edge-path");
-      const stroke = basePath?.getAttribute("style") ?? "";
-      expect(stroke).toContain("-active");
+      const stops = Array.from(container.querySelectorAll("stop"));
+      expect(stops.length).toBeGreaterThan(0);
+      expect(stops[0]?.getAttribute("stop-opacity")).toBe("1");
     });
 
     it("should have dimmed opacity when not connected to selected node", () => {
@@ -185,10 +183,9 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      // Should reference the "dimmed" shared gradient
-      const basePath = container.querySelector(".react-flow__edge-path");
-      const stroke = basePath?.getAttribute("style") ?? "";
-      expect(stroke).toContain("-dimmed");
+      const stops = Array.from(container.querySelectorAll("stop"));
+      expect(stops.length).toBeGreaterThan(0);
+      expect(stops[0]?.getAttribute("stop-opacity")).toBe("0.25");
     });
 
     it("should be dimmed when no nodes are selected", () => {
@@ -204,10 +201,9 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      // Should reference the "dimmed" shared gradient
-      const basePath = container.querySelector(".react-flow__edge-path");
-      const stroke = basePath?.getAttribute("style") ?? "";
-      expect(stroke).toContain("-dimmed");
+      const stops = Array.from(container.querySelectorAll("stop"));
+      expect(stops.length).toBeGreaterThan(0);
+      expect(stops[0]?.getAttribute("stop-opacity")).toBe("0.25");
     });
   });
 
@@ -240,9 +236,9 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      const basePath = container.querySelector(".react-flow__edge-path");
-      const stroke = basePath?.getAttribute("style") ?? "";
-      expect(stroke).toContain("-active");
+      const stops = Array.from(container.querySelectorAll("stop"));
+      expect(stops.length).toBeGreaterThan(0);
+      expect(stops[0]?.getAttribute("stop-opacity")).toBe("1");
     });
 
     it("should highlight when target node is selected", () => {
@@ -258,9 +254,9 @@ describe("ReferenceEdge", () => {
         </TestWrapper>
       );
 
-      const basePath = container.querySelector(".react-flow__edge-path");
-      const stroke = basePath?.getAttribute("style") ?? "";
-      expect(stroke).toContain("-active");
+      const stops = Array.from(container.querySelectorAll("stop"));
+      expect(stops.length).toBeGreaterThan(0);
+      expect(stops[0]?.getAttribute("stop-opacity")).toBe("1");
     });
   });
 });

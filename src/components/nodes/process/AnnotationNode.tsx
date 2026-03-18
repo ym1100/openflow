@@ -8,8 +8,9 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { AnnotationNodeData } from "@/types";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { getMediaDimensions, calculateNodeSizeForFullBleed, SQUARE_SIZE } from "@/utils/nodeDimensions";
-import { MediaExpandButton } from "../shared/MediaExpandButton";
 import { ConnectedImageThumbnails } from "../shared/ConnectedImageThumbnails";
+import { AnnotationNodeToolbar } from "./AnnotationNodeToolbar";
+import { useMediaViewer } from "@/providers/media-viewer";
 
 type AnnotationNodeType = Node<AnnotationNodeData, "annotation">;
 
@@ -21,15 +22,15 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
   const edges = useWorkflowStore((state) => state.edges);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { getNode, updateNode } = useReactFlow();
-
-  const displayImage = nodeData.outputImage || nodeData.sourceImage;
+  const { openViewer } = useMediaViewer();
 
   // Resize node to match image/video aspect ratio when content is set
   useEffect(() => {
     const node = getNode(id);
     if (!node) return;
 
-    if (!displayImage) {
+    const displayForSize = nodeData.outputImage || nodeData.sourceImage;
+    if (!displayForSize) {
       // Reset to default when image removed
       const defaultWidth = SQUARE_SIZE;
       const defaultHeight = SQUARE_SIZE;
@@ -45,7 +46,7 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
       return;
     }
 
-    getMediaDimensions(displayImage).then((dims) => {
+    getMediaDimensions(displayForSize).then((dims) => {
       if (!dims || dims.width <= 0 || dims.height <= 0) return;
 
       const node = getNode(id);
@@ -64,7 +65,7 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
         });
       }
     });
-  }, [id, displayImage, getNode, updateNode]);
+  }, [id, nodeData.outputImage, nodeData.sourceImage, getNode, updateNode]);
 
   const handleFileChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -143,6 +144,16 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
     return { layers: combined, imageLayerTransforms: transforms };
   }, [id, nodes, edges, nodeData.layers, nodeData.sourceImage, nodeData.outputImage, nodeData.imageLayerTransforms]);
 
+  // Preview behavior:
+  // - If we have an outputImage, show it (represents the composed result)
+  // - Otherwise, if there are active connected images, preview the first one
+  // - Otherwise fall back to manually loaded sourceImage
+  const displayImage = useMemo(() => {
+    if (nodeData.outputImage) return nodeData.outputImage;
+    if (layers.length > 0) return layers[0] ?? null;
+    return nodeData.sourceImage ?? null;
+  }, [nodeData.outputImage, nodeData.sourceImage, layers]);
+
   const handleEdit = useCallback(() => {
     if (layers.length === 0) {
       alert("No image available. Connect an image or load one manually.");
@@ -151,6 +162,11 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
     openModal(id, layers, nodeData.annotations, imageLayerTransforms.length > 0 ? imageLayerTransforms : undefined);
   }, [id, layers, nodeData.annotations, imageLayerTransforms, openModal]);
 
+  const handleFullscreen = useCallback(() => {
+    if (!displayImage) return;
+    openViewer([{ url: displayImage, type: "image", nodeId: id }], 0);
+  }, [displayImage, id, openViewer]);
+
   return (
     <BaseNode
       id={id}
@@ -158,6 +174,13 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
       contentClassName="flex-1 min-h-0 overflow-clip"
       aspectFitMedia={nodeData.outputImage}
     >
+      <AnnotationNodeToolbar
+        nodeId={id}
+        disabled={!displayImage && layers.length === 0}
+        onEditClick={handleEdit}
+        onFullscreenClick={handleFullscreen}
+      />
+
       <input
         ref={fileInputRef}
         type="file"
@@ -180,10 +203,7 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
       />
 
       {displayImage ? (
-        <div
-          className="relative group cursor-pointer w-full h-full"
-          onClick={handleEdit}
-        >
+        <div className="relative group w-full h-full">
           <div className="absolute bottom-2 left-2 z-10">
             <ConnectedImageThumbnails nodeId={id} />
           </div>
@@ -192,14 +212,6 @@ export function AnnotationNode({ id, data, selected }: NodeProps<AnnotationNodeT
             alt="Annotated"
             className="w-full h-full object-contain"
           />
-          <div className="absolute top-2 right-2 flex gap-1">
-            <MediaExpandButton nodeId={id} mediaUrl={displayImage} />
-          </div>
-          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors flex items-center justify-center pointer-events-none">
-            <span className="text-xs font-medium text-white opacity-0 group-hover:opacity-100 transition-opacity bg-black/60 px-3 py-1.5 rounded">
-              {nodeData.annotations.length > 0 ? `Edit layers (${nodeData.annotations.length})` : "Edit layers"}
-            </span>
-          </div>
         </div>
       ) : (
         <div
