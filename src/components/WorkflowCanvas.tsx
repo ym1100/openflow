@@ -1245,6 +1245,17 @@ export function WorkflowCanvas() {
       return;
     }
 
+    // Select all (Ctrl/Cmd + A)
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+      event.preventDefault();
+      if (nodes.length > 0) {
+        onNodesChange(
+          nodes.map((n) => ({ type: "select" as const, id: n.id, selected: true }))
+        );
+      }
+      return;
+    }
+
     // Handle keyboard shortcuts dialog (? key)
     if (event.key === "?" && !event.ctrlKey && !event.metaKey) {
       event.preventDefault();

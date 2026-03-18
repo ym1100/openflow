@@ -14,7 +14,6 @@ interface CanvasContextMenuProps {
 
 export function CanvasContextMenu({ position, nodeId, onClose }: CanvasContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
-  const [showNodeList, setShowNodeList] = useState(false);
   const addNode = useWorkflowStore((state) => state.addNode);
   const removeNode = useWorkflowStore((state) => state.removeNode);
   const executeWorkflow = useWorkflowStore((state) => state.executeWorkflow);
@@ -52,21 +51,6 @@ export function CanvasContextMenu({ position, nodeId, onClose }: CanvasContextMe
     [addNode, flowPosition, onClose]
   );
 
-  const handleAddComment = useCallback(() => {
-    addNode("comment", flowPosition);
-    onClose();
-  }, [addNode, flowPosition, onClose]);
-
-  const handleSelectAll = useCallback(() => {
-    const { nodes, onNodesChange } = useWorkflowStore.getState();
-    if (nodes.length > 0) {
-      onNodesChange(
-        nodes.map((n) => ({ type: "select" as const, id: n.id, selected: true }))
-      );
-    }
-    onClose();
-  }, [onClose]);
-
   // Close when clicking outside
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
@@ -83,17 +67,13 @@ export function CanvasContextMenu({ position, nodeId, onClose }: CanvasContextMe
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (showNodeList) {
-          setShowNodeList(false);
-        } else {
-          onClose();
-        }
+        onClose();
       }
     };
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [onClose, showNodeList]);
+  }, [onClose]);
 
   const panelClassName =
     "fixed z-[200] w-80 max-w-80 rounded-xl border border-neutral-700/40 bg-[var(--background-transparent-black-default)] backdrop-blur-lg overflow-hidden";
@@ -176,114 +156,36 @@ export function CanvasContextMenu({ position, nodeId, onClose }: CanvasContextMe
         top: position.y,
       }}
     >
-      {showNodeList ? (
-        <>
-          <div className="flex flex-col px-1 py-1">
-            <button
-              onClick={() => setShowNodeList(false)}
-              className="w-full rounded-lg px-3 py-2 text-left text-[11px] font-medium text-neutral-400 hover:bg-white/10 hover:text-neutral-100 transition-colors flex items-center gap-2"
+      <div className="flex flex-col px-1 py-1">
+        <div className={sectionTitleClassName}>Add Node</div>
+      </div>
+      <div className="px-1 py-1 max-h-[320px] overflow-y-auto">
+        {ALL_NODES_CATEGORIES.map((category, catIndex) => (
+          <div key={category.label}>
+            <div
+              className={`select-none px-3 py-2 text-[10px] text-neutral-500 uppercase tracking-wide${
+                catIndex > 0 ? " border-t border-neutral-800/60" : ""
+              }`}
             >
-              <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M15 18l-6-6 6-6" />
-              </svg>
-              Back
-            </button>
-            <div className={sectionTitleClassName}>Add Node</div>
-          </div>
-          <div className="px-1 py-1 max-h-[320px] overflow-y-auto">
-            {ALL_NODES_CATEGORIES.map((category, catIndex) => (
-              <div key={category.label}>
-                <div
-                  className={`select-none px-3 py-2 text-[10px] text-neutral-500 uppercase tracking-wide${
-                    catIndex > 0 ? " border-t border-neutral-800/60" : ""
-                  }`}
-                >
-                  {category.label}
+              {category.label}
+            </div>
+            {category.nodes.map((node) => (
+              <button
+                key={node.type}
+                onClick={() => handleAddNode(node.type)}
+                className={rowClassName}
+              >
+                <div className={iconTileClassName}>
+                  <span className="text-[11px] font-medium">{node.label.slice(0, 1).toUpperCase()}</span>
                 </div>
-                {category.nodes.map((node) => (
-                  <button
-                    key={node.type}
-                    onClick={() => handleAddNode(node.type)}
-                    className={rowClassName}
-                  >
-                    <div className={iconTileClassName}>
-                      <span className="text-[11px] font-medium">{node.label.slice(0, 1).toUpperCase()}</span>
-                    </div>
-                    <div className="relative flex h-8 items-center text-left">
-                      <span className="select-none truncate">{node.label}</span>
-                    </div>
-                  </button>
-                ))}
-              </div>
+                <div className="relative flex h-8 items-center text-left">
+                  <span className="select-none truncate">{node.label}</span>
+                </div>
+              </button>
             ))}
           </div>
-        </>
-      ) : (
-        <div className="flex flex-col px-1 py-1">
-          <div className={sectionTitleClassName}>Add Source</div>
-          <button
-            onClick={() => setShowNodeList(true)}
-            className={rowClassName}
-          >
-            <div className={iconTileClassName}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M5 12h14" />
-                <path d="M12 5v14" />
-              </svg>
-            </div>
-            <div className="relative flex h-8 items-center text-left">
-              <span className="select-none truncate">Add a new node</span>
-            </div>
-          </button>
-          <button
-            onClick={() => handleAddNode("mediaInput")}
-            className={rowClassName}
-          >
-            <div className={iconTileClassName}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
-                <polyline points="17 8 12 3 7 8" />
-                <line x1="12" x2="12" y1="3" y2="15" />
-              </svg>
-            </div>
-            <div className="relative flex h-8 items-center text-left">
-              <span className="select-none truncate">Upload</span>
-            </div>
-          </button>
-          <div className="my-1 mx-3 h-px bg-neutral-800/60" />
-          <div className={sectionTitleClassName}>Other</div>
-          <button
-            onClick={handleAddComment}
-            className={rowClassName}
-          >
-            <div className={iconTileClassName}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
-              </svg>
-            </div>
-            <div className="relative flex h-8 items-center text-left">
-              <span className="select-none truncate">Add comment</span>
-            </div>
-          </button>
-          <button
-            onClick={handleSelectAll}
-            className={rowClassName}
-          >
-            <div className={iconTileClassName}>
-              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <path d="M3 3v18h18" />
-                <path d="M18 9V3" />
-                <path d="M18 15V3" />
-                <path d="M3 15V3" />
-                <path d="M3 21V9" />
-              </svg>
-            </div>
-            <div className="relative flex h-8 items-center text-left">
-              <span className="select-none truncate">Select all</span>
-            </div>
-          </button>
-        </div>
-      )}
+        ))}
+      </div>
     </div>
   );
 }
