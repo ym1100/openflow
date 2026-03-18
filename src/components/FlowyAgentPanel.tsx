@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EditOperation } from "@/lib/chat/editOperations";
+import { MousePointerClick } from "lucide-react";
 
 type WorkflowState = {
   nodes: Array<{
@@ -756,14 +757,10 @@ export function FlowyAgentPanel({
             transition: "left 220ms ease, top 220ms ease, opacity 220ms ease",
             opacity: isExecutingStep ? 1 : 0.95,
           }}
-          className="w-5 h-5"
+          className="flex items-center gap-2 rounded-md border border-purple-700/60 bg-purple-900/20 backdrop-blur px-2 py-1"
         >
-          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M4 4v6h6" />
-            <path d="M10 14l-6 6" />
-            <path d="M14 10l6-6" />
-            <path d="M13 7l4 4" />
-          </svg>
+          <MousePointerClick size={18} color="#E9D5FF" />
+          <span className="text-[11px] text-purple-100 font-semibold">agent</span>
         </div>
       )}
     </div>
