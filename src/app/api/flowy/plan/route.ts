@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { spawn } from "child_process";
 import path from "path";
+import { loadWorkflowFromFileProject, isFileProjectId } from "@/lib/projectFileIO";
 
 export const runtime = "nodejs";
 
@@ -8,6 +9,7 @@ type PlanRequest = {
   message: string;
   workflowState?: { nodes: any[]; edges: any[] };
   selectedNodeIds?: string[];
+  projectId?: string;
   provider?: string;
   model?: string;
 };
@@ -73,7 +75,32 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "message is required" }, { status: 400 });
     }
 
-    const result = await runFlowyPlanner(body);
+    let workflowState = body.workflowState;
+    if (!workflowState && body.projectId) {
+      if (!isFileProjectId(body.projectId)) {
+        return NextResponse.json(
+          { ok: false, error: "Server-side planning only supported for file projectIds (path-like ids)." },
+          { status: 400 }
+        );
+      }
+      const loaded = await loadWorkflowFromFileProject(body.projectId);
+      workflowState = {
+        nodes: loaded.workflow?.nodes ?? [],
+        edges: loaded.workflow?.edges ?? [],
+      };
+    }
+
+    if (!workflowState) {
+      return NextResponse.json(
+        { ok: false, error: "workflowState is required unless projectId is provided." },
+        { status: 400 }
+      );
+    }
+
+    const result = await runFlowyPlanner({
+      ...body,
+      workflowState,
+    });
     return NextResponse.json(result);
   } catch (err) {
     console.error("[Flowy plan] error:", err);

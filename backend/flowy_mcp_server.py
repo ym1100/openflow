@@ -72,6 +72,44 @@ def get_canvas_state() -> Dict[str, Any]:
     }
 
 
+@mcp.tool()
+def get_canvas_state_project(project_id: str) -> Dict[str, Any]:
+    """
+    Fetch canvas state for a file-backed project from the website API.
+
+    This allows the agent to plan using real nodes/edges without the UI
+    needing to send workflowState.
+    """
+    base_url = _get_site_base_url()
+    # Note: use GET for the state endpoint.
+    url = f"{base_url}/api/flowy/canvas-state?projectId={project_id}"
+    try:
+        req = Request(url, method="GET")
+        with urlopen(req, timeout=60) as resp:
+            raw = resp.read().decode("utf-8")
+            payload = json.loads(raw)
+            if not isinstance(payload, dict) or not payload.get("ok"):
+                return {"nodes": [], "edges": [], "groups": [], "selectedNodeIds": [], "version": 1, "error": payload.get("error")}
+            ws = payload.get("workflowState") or {}
+            return {
+                "nodes": ws.get("nodes") or [],
+                "edges": ws.get("edges") or [],
+                "groups": ws.get("groups") or [],
+                "selectedNodeIds": [],
+                "version": payload.get("version") or 1,
+                "directoryPath": payload.get("directoryPath"),
+            }
+    except Exception as e:
+        return {
+            "nodes": [],
+            "edges": [],
+            "groups": [],
+            "selectedNodeIds": [],
+            "version": 1,
+            "error": str(e),
+        }
+
+
 def _heuristic_plan_edits(
     message: str,
     workflow_state: Optional[Dict[str, Any]] = None,
@@ -600,6 +638,79 @@ def plan_and_apply_edits_web(
         },
     )
     # Combine plan metadata + apply result so clients can render cursor/timeline too.
+    return {
+        "ok": applied.get("ok", False),
+        "assistantText": plan.get("assistantText", ""),
+        "operations": operations,
+        "requiresApproval": False,
+        "applied": applied.get("applied"),
+        "skipped": applied.get("skipped"),
+        "nodes": applied.get("nodes"),
+        "edges": applied.get("edges"),
+    }
+
+
+@mcp.tool()
+def plan_edits_project(
+    message: str,
+    project_id: str,
+    selected_node_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Plan edit operations for a file-backed project stored on disk.
+
+    This uses the website route `/api/flowy/plan` with `projectId`,
+    so the server loads canvas state from the project directory.
+    """
+    selected_node_ids = selected_node_ids or []
+    base_url = _get_site_base_url()
+    return _post_json(
+        f"{base_url}/api/flowy/plan",
+        {
+            "message": message,
+            "projectId": project_id,
+            "selectedNodeIds": selected_node_ids,
+        },
+    )
+
+
+@mcp.tool()
+def plan_and_apply_edits_project(
+    message: str,
+    project_id: str,
+    selected_node_ids: Optional[List[str]] = None,
+) -> Dict[str, Any]:
+    """
+    Plan + apply edit operations for a file-backed project stored on disk.
+
+    Flow:
+    - POST /api/flowy/plan with `projectId`
+    - POST /api/flowy/apply with `projectId` and `operations`
+    """
+    selected_node_ids = selected_node_ids or []
+    base_url = _get_site_base_url()
+
+    plan = _post_json(
+        f"{base_url}/api/flowy/plan",
+        {
+            "message": message,
+            "projectId": project_id,
+            "selectedNodeIds": selected_node_ids,
+        },
+    )
+
+    if not isinstance(plan, dict) or not plan.get("ok"):
+        return plan
+
+    operations = plan.get("operations") or []
+    applied = _post_json(
+        f"{base_url}/api/flowy/apply",
+        {
+            "projectId": project_id,
+            "operations": operations,
+        },
+    )
+
     return {
         "ok": applied.get("ok", False),
         "assistantText": plan.get("assistantText", ""),
