@@ -2,7 +2,17 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { EditOperation } from "@/lib/chat/editOperations";
-import { MousePointerClick } from "lucide-react";
+import { ChevronDown, Minus, MousePointerClick, PanelRightOpen, Settings2, SquarePen } from "lucide-react";
+import {
+  createEmptyFlowySession,
+  loadCustomInstructions,
+  loadDockedPreference,
+  loadFlowyPanelSessions,
+  saveCustomInstructions,
+  saveDockedPreference,
+  saveFlowyPanelSessions,
+  type StoredChatSession,
+} from "@/lib/flowy/flowyPanelStorage";
 
 type WorkflowState = {
   nodes: Array<{
@@ -49,6 +59,13 @@ type ChatMsg = {
   text: string;
 };
 
+type ChatSession = {
+  id: string;
+  title: string;
+  messages: ChatMsg[];
+  createdAt: number;
+};
+
 export function FlowyAgentPanel({
   isOpen,
   onClose,
@@ -64,6 +81,22 @@ export function FlowyAgentPanel({
   workflowState?: WorkflowState;
   selectedNodeIds?: string[];
 }) {
+  const createSession = useCallback((title = "New Chat"): ChatSession => {
+    const base = createEmptyFlowySession();
+    return { ...base, title };
+  }, []);
+
+  const seed = useMemo(() => createEmptyFlowySession(), []);
+
+  const [sessions, setSessions] = useState<ChatSession[]>(() => [{ ...seed, title: "New Chat" }]);
+  const [activeSessionId, setActiveSessionId] = useState<string>(() => seed.id);
+  const [isDocked, setIsDocked] = useState<boolean>(() => loadDockedPreference());
+  const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
+  const [customInstructions, setCustomInstructions] = useState<string>(() => loadCustomInstructions());
+  const [historyMenuOpen, setHistoryMenuOpen] = useState(false);
+  const historyButtonRef = useRef<HTMLButtonElement>(null);
+  const historyMenuRef = useRef<HTMLDivElement>(null);
+  const [storageReady, setStorageReady] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const [input, setInput] = useState("");
   const [isPlanning, setIsPlanning] = useState(false);
@@ -90,6 +123,76 @@ export function FlowyAgentPanel({
   const autoRunCompletedRef = useRef(false);
   const lastGoalRef = useRef<string | null>(null);
   const autoContinueCountRef = useRef<number>(0);
+
+  // Hydrate sessions from localStorage once on client (after SSR default seed).
+  useEffect(() => {
+    const loaded = loadFlowyPanelSessions();
+    if (loaded) {
+      setSessions(loaded.sessions as ChatSession[]);
+      setActiveSessionId(loaded.activeId);
+      const active = loaded.sessions.find((s) => s.id === loaded.activeId);
+      setChatMessages((active?.messages ?? []) as ChatMsg[]);
+    }
+    setStorageReady(true);
+  }, []);
+
+  useEffect(() => {
+    // Ensure there is always an active session (handles initial render safely).
+    if (!sessions.some((s) => s.id === activeSessionId)) {
+      const fallback = sessions[0];
+      if (fallback) setActiveSessionId(fallback.id);
+    }
+  }, [activeSessionId, sessions]);
+
+  // Persist chat sessions + active id
+  useEffect(() => {
+    if (!storageReady || sessions.length === 0 || !activeSessionId) return;
+    saveFlowyPanelSessions(sessions as StoredChatSession[], activeSessionId);
+  }, [storageReady, sessions, activeSessionId]);
+
+  useEffect(() => {
+    saveCustomInstructions(customInstructions);
+  }, [customInstructions]);
+
+  useEffect(() => {
+    saveDockedPreference(isDocked);
+  }, [isDocked]);
+
+  useEffect(() => {
+    if (!historyMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (historyButtonRef.current?.contains(t) || historyMenuRef.current?.contains(t)) return;
+      setHistoryMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setHistoryMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [historyMenuOpen]);
+
+  useEffect(() => {
+    const active = sessions.find((s) => s.id === activeSessionId);
+    if (active) setChatMessages(active.messages);
+  }, [activeSessionId, sessions]);
+
+  useEffect(() => {
+    setSessions((prev) =>
+      prev.map((s) => {
+        if (s.id !== activeSessionId) return s;
+        const firstUser = chatMessages.find((m) => m.role === "user")?.text?.trim();
+        const title = firstUser
+          ? firstUser.replace(/\s+/g, " ").slice(0, 42) + (firstUser.length > 42 ? "..." : "")
+          : "New Chat";
+        return { ...s, messages: chatMessages, title };
+      })
+    );
+  }, [activeSessionId, chatMessages]);
 
   const stateForRequest = useMemo(() => {
     // Ensure we always send a consistent shape.
@@ -164,7 +267,9 @@ export function FlowyAgentPanel({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            message: trimmed,
+            message: customInstructions.trim().length
+              ? `Custom instructions:\n${customInstructions.trim()}\n\nUser request:\n${trimmed}`
+              : trimmed,
             workflowState: stateForRequest,
             selectedNodeIds: contextNodeIds,
           }),
@@ -218,7 +323,7 @@ export function FlowyAgentPanel({
         setIsPlanning(false);
       }
     },
-    [contextNodeIds, isPlanning, scrollToBottom, stateForRequest]
+    [contextNodeIds, customInstructions, isPlanning, scrollToBottom, stateForRequest]
   );
 
   const handlePlan = useCallback(async () => {
@@ -441,21 +546,140 @@ export function FlowyAgentPanel({
     // No cleanup needed beyond runId checks.
   }, [applyMode, executionIndex, isOpen, onApplyEdits, pendingOperations, applyOperationAtIndex]);
 
+  const sortedSessions = useMemo(
+    () => [...sessions].sort((a, b) => b.createdAt - a.createdAt),
+    [sessions]
+  );
+  const activeSession = useMemo(
+    () => sortedSessions.find((s) => s.id === activeSessionId) ?? sortedSessions[0],
+    [sortedSessions, activeSessionId]
+  );
+
+  const switchToSession = useCallback(
+    (id: string) => {
+      stopAutoRun();
+      setActiveSessionId(id);
+      const s = sessions.find((x) => x.id === id);
+      setChatMessages(s?.messages ?? []);
+      setPendingOperations(null);
+      setPendingExplanation(null);
+      setPendingExecuteNodeIds(null);
+      resetExecution();
+      setErrorMessage(null);
+      setHistoryMenuOpen(false);
+    },
+    [sessions, resetExecution, stopAutoRun]
+  );
+
+  const handleNewChat = useCallback(() => {
+    const next = createSession();
+    setSessions((prev) => [next, ...prev]);
+    setActiveSessionId(next.id);
+    setChatMessages([]);
+    setHistoryMenuOpen(false);
+    setInput("");
+    setPendingOperations(null);
+    setPendingExplanation(null);
+    setPendingExecuteNodeIds(null);
+    setErrorMessage(null);
+    setExecutionIndex(0);
+    autoRunCompletedRef.current = true;
+    autoContinueCountRef.current = 0;
+  }, [createSession]);
+
   if (!isOpen) return null;
 
   return (
-    <div className="fixed bottom-[90px] right-5 w-[380px] max-h-[70vh] bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl flex flex-col overflow-hidden z-40">
-      <div className="flex items-center justify-between px-4 py-3 border-b border-neutral-700">
-        <h3 className="text-sm font-medium text-neutral-200">Flowy</h3>
-        <div className="flex items-center gap-1">
+    <div
+      className={`fixed bg-neutral-900/90 backdrop-blur-xl border border-white/10 shadow-xl flex flex-col overflow-hidden z-40 transition-all duration-200 ${
+        isDocked
+          ? "right-0 bottom-0 top-0 w-[480px] rounded-none border-r-0"
+          : "bottom-[90px] right-5 w-[480px] max-h-[70vh] rounded-3xl"
+      }`}
+    >
+      <div className="relative z-10 flex w-full shrink-0 items-center justify-between p-2 border-b border-white/10">
+        <div className="group relative z-[100] flex min-w-0 items-center gap-1">
           <button
-            onClick={onClose}
-            className="text-neutral-400 hover:text-neutral-200 transition-colors p-1"
-            aria-label="Close Flowy panel"
+            ref={historyButtonRef}
+            type="button"
+            aria-label="Chat history"
+            aria-haspopup="listbox"
+            aria-expanded={historyMenuOpen}
+            onClick={() => setHistoryMenuOpen((o) => !o)}
+            className="flex h-8 max-w-[200px] items-center justify-center gap-1.5 overflow-hidden rounded-xl px-2 text-sm leading-none tracking-tight text-neutral-200 transition-colors hover:bg-white/10 focus:outline-none focus-visible:ring-2 focus-visible:ring-white/25"
           >
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-            </svg>
+            <span className="max-w-[160px] truncate whitespace-nowrap">
+              {activeSession?.title ?? "New Chat"}
+            </span>
+            <ChevronDown
+              className={`size-3.5 shrink-0 text-neutral-400 transition-transform duration-200 ${
+                historyMenuOpen ? "rotate-180" : ""
+              }`}
+              aria-hidden
+            />
+          </button>
+          {historyMenuOpen && (
+            <div
+              ref={historyMenuRef}
+              role="listbox"
+              aria-label="Previous chats"
+              className="absolute left-0 top-[calc(100%+6px)] z-[120] w-[min(100vw-2rem,280px)] overflow-hidden rounded-xl border border-white/10 bg-neutral-900/95 py-1 shadow-xl backdrop-blur-xl"
+            >
+              {sortedSessions.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-neutral-500">No chats yet</div>
+              ) : (
+                sortedSessions.map((s) => (
+                  <button
+                    key={s.id}
+                    type="button"
+                    role="option"
+                    aria-selected={s.id === activeSessionId}
+                    onClick={() => switchToSession(s.id)}
+                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
+                      s.id === activeSessionId
+                        ? "bg-white/10 text-white"
+                        : "text-neutral-300 hover:bg-white/10 hover:text-white"
+                    }`}
+                  >
+                    <span className="truncate">{s.title}</span>
+                  </button>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+        <div className="flex items-center justify-center" role="toolbar" aria-label="Sidebar controls">
+          <button
+            type="button"
+            aria-label="Custom prompt instructions"
+            className="rounded-xl p-2 text-neutral-300 hover:bg-white/10 hover:text-white transition-colors"
+            onClick={() => setIsSettingsOpen(true)}
+          >
+            <Settings2 className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label="Start new chat"
+            className="rounded-xl p-2 text-neutral-300 hover:bg-white/10 hover:text-white transition-colors"
+            onClick={handleNewChat}
+          >
+            <SquarePen className="size-4" />
+          </button>
+          <button
+            type="button"
+            aria-label={isDocked ? "Undock panel" : "Dock panel"}
+            className="rounded-xl p-2 text-neutral-300 hover:bg-white/10 hover:text-white transition-colors"
+            onClick={() => setIsDocked((v) => !v)}
+          >
+            <PanelRightOpen className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-xl p-2 text-neutral-300 hover:bg-white/10 hover:text-white transition-colors"
+            aria-label="Minimize chat"
+          >
+            <Minus className="size-4" />
           </button>
         </div>
       </div>
@@ -677,7 +901,7 @@ export function FlowyAgentPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="border-t border-neutral-700 p-3">
+      <div className="border-t border-white/10 p-3">
         <form
           className="flex gap-2"
           onSubmit={(e) => {
@@ -713,6 +937,60 @@ export function FlowyAgentPanel({
           </button>
         </form>
       </div>
+
+      {/* Custom instructions modal */}
+      {isSettingsOpen && (
+        <div
+          className="fixed inset-0 z-[9999] bg-black/50 flex items-center justify-center"
+          onMouseDown={() => setIsSettingsOpen(false)}
+        >
+          <div
+            className="bg-neutral-900 border border-white/10 rounded-2xl shadow-xl w-[560px] max-w-[92vw]"
+            onMouseDown={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-white/10 flex items-center justify-between gap-3">
+              <div className="flex flex-col">
+                <h4 className="text-sm font-medium text-neutral-100">Custom instructions</h4>
+                <p className="text-xs text-neutral-400">
+                  Applied to every message in this panel session.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSettingsOpen(false)}
+                className="text-neutral-400 hover:text-neutral-200 transition-colors p-1"
+                aria-label="Close instructions"
+              >
+                <Minus className="w-5 h-5 rotate-45" />
+              </button>
+            </div>
+            <div className="p-4">
+              <textarea
+                value={customInstructions}
+                onChange={(e) => setCustomInstructions(e.target.value)}
+                placeholder="Example: Prefer concise answers first; only edit canvas when I explicitly ask."
+                className="w-full min-h-[140px] bg-neutral-900/40 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-blue-500 resize-y"
+              />
+              <div className="mt-3 flex items-center justify-between">
+                <button
+                  type="button"
+                  onClick={() => setCustomInstructions("")}
+                  className="px-3 py-2 text-xs text-neutral-300 hover:text-neutral-100 transition-colors rounded-lg border border-neutral-600 bg-neutral-800/30"
+                >
+                  Clear
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSettingsOpen(false)}
+                  className="px-3 py-2 text-xs text-white hover:bg-blue-500 transition-colors rounded-lg bg-blue-600"
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Node context picker (@ mention) */}
       {isNodePickerOpen && workflowState && (
