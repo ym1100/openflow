@@ -5,12 +5,16 @@ import type { EditOperation } from "@/lib/chat/editOperations";
 import {
   AtSign,
   ChevronDown,
+  ChevronRight,
+  Copy,
+  LayoutGrid,
   Minus,
   MousePointerClick,
   Paperclip,
   PanelRightOpen,
   Settings2,
   SquarePen,
+  SquarePlus,
 } from "lucide-react";
 import {
   createEmptyFlowySession,
@@ -152,6 +156,7 @@ export function FlowyAgentPanel({
   const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([]);
   const [isNodePickerOpen, setIsNodePickerOpen] = useState(false);
   const [nodePickerQuery, setNodePickerQuery] = useState("");
+  const [plannerTimelineOpen, setPlannerTimelineOpen] = useState(true);
   const [cursor, setCursor] = useState<{ x: number; y: number; visible: boolean }>({
     x: 0,
     y: 0,
@@ -543,6 +548,30 @@ export function FlowyAgentPanel({
     setCursor((c) => ({ ...c, visible: false }));
   }, []);
 
+  const dismissPendingPlan = useCallback(() => {
+    stopAutoRun();
+    setPendingOperations(null);
+    setPendingExplanation(null);
+    setPendingExecuteNodeIds(null);
+    resetExecution();
+    autoRunCompletedRef.current = true;
+  }, [resetExecution, stopAutoRun]);
+
+  useEffect(() => {
+    if (!isOpen || !pendingOperations) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      dismissPendingPlan();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [dismissPendingPlan, isOpen, pendingOperations]);
+
+  useEffect(() => {
+    if (!pendingOperations) return;
+    setPlannerTimelineOpen(true);
+  }, [pendingOperations]);
+
   useEffect(() => {
     if (!pendingOperations) return;
     if (executionIndex < pendingOperations.length) return;
@@ -639,12 +668,23 @@ export function FlowyAgentPanel({
 
   if (!isOpen) return null;
 
+  const footerStatusText = [
+    isPlanning ? "Flowy is planning a response." : "",
+    pendingOperations ? "Canvas changes waiting for your review." : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div
-      className={`fixed bg-neutral-900/90 backdrop-blur-xl border border-white/10 shadow-xl flex flex-col overflow-hidden z-40 transition-all duration-200 ${
+      role="dialog"
+      aria-modal="true"
+      aria-label="Flowy AI chat"
+      data-testid="flowy-sidebar"
+      className={`fixed z-40 flex flex-col overflow-hidden transition-all duration-200 ${
         isDocked
-          ? "right-0 bottom-0 top-0 w-[480px] rounded-none border-r-0"
-          : "bottom-[90px] right-5 w-[480px] max-h-[70vh] rounded-3xl"
+          ? "right-0 bottom-0 top-0 w-[480px] rounded-none border-l border-white/10 bg-neutral-900/90 backdrop-blur-xl shadow-xl"
+          : "bottom-16 right-4 h-[min(576px,calc(100vh-136px))] max-h-[min(576px,calc(100vh-136px))] w-[480px] rounded-[24px] border border-white/[0.11] bg-[rgb(25,25,25)]/90 shadow-[0_8px_10px_-6px_rgba(0,0,0,0.1),0_20px_25px_-5px_rgba(0,0,0,0.1)] backdrop-blur-[12px]"
       }`}
     >
       <div className="relative z-10 flex w-full shrink-0 items-center justify-between p-2 border-b border-white/10">
@@ -734,13 +774,15 @@ export function FlowyAgentPanel({
         </div>
       </div>
 
-      <div
-        className="flex-1 overflow-y-auto p-4 space-y-3 min-h-0"
-        onWheelCapture={(e) => e.stopPropagation()}
-        style={{ touchAction: "pan-y" }}
-      >
+      <div className="relative -mb-8 flex min-h-0 w-full flex-1 flex-col overflow-hidden">
+        <div
+          className="flowy-chat-scrollbar flex min-h-0 w-full flex-1 flex-col overflow-y-auto overflow-x-hidden pb-16"
+          onWheelCapture={(e) => e.stopPropagation()}
+          style={{ touchAction: "pan-y", overflowAnchor: "none" as const }}
+        >
+          <div className="flex flex-col gap-6 py-4">
         {selectedContextSummary && (
-          <div className="bg-neutral-700/50 border border-neutral-600 rounded-lg px-3 py-2 text-xs text-neutral-300">
+          <div className="mx-4 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs leading-snug text-neutral-300">
             Using your selected node context ({selectedContextSummary.count} selected):
             {" "}
             {selectedContextSummary.types.length ? selectedContextSummary.types.join(", ") : "nodes"}
@@ -748,10 +790,10 @@ export function FlowyAgentPanel({
         )}
 
         {errorMessage && (
-          <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-sm text-red-200">
+          <div className="mx-4 rounded-xl border border-red-800/60 bg-red-950/40 p-3 text-sm text-red-200">
             {errorMessage}
             <button
-              className="block text-xs text-red-300 hover:text-red-100 underline mt-2"
+              className="mt-2 block text-xs text-red-300 underline hover:text-red-100"
               onClick={() => setErrorMessage(null)}
               type="button"
             >
@@ -761,7 +803,7 @@ export function FlowyAgentPanel({
         )}
 
         {chatMessages.length === 0 && !errorMessage && (
-          <div className="text-center text-neutral-500 text-sm py-8 px-2">
+          <div className="px-4 text-center text-sm text-neutral-500 py-8">
             {flowyAgentMode === "plan" ? (
               <>
                 <p className="text-neutral-400">Plan mode — advice only (no canvas edits).</p>
@@ -783,189 +825,146 @@ export function FlowyAgentPanel({
           </div>
         )}
 
-        {chatMessages.map((m) => (
-          <div key={m.id} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                m.role === "user" ? "bg-blue-600 text-white" : "bg-neutral-700 text-neutral-200"
-              }`}
-            >
-              <p className="whitespace-pre-wrap">{m.text}</p>
+        {chatMessages.map((m) =>
+          m.role === "user" ? (
+            <div key={m.id} className="group/message flex select-text flex-col items-end gap-2.5 px-4 py-1">
+              <div className="max-w-[85%] rounded-2xl bg-white/[0.1] px-4 py-2 text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] backdrop-blur-sm">
+                <p className="m-0 whitespace-pre-wrap text-sm leading-[1.5]">{m.text}</p>
+              </div>
+              <div className="flex items-center gap-1 pr-1 opacity-0 transition-opacity group-focus-within/message:opacity-100 group-hover/message:opacity-100">
+                <button
+                  type="button"
+                  aria-label="Copy message"
+                  className="flex size-6 items-center justify-center rounded-lg text-neutral-400 outline-none transition-colors hover:bg-white/10 hover:text-neutral-200 focus-visible:ring-2 focus-visible:ring-white/20"
+                  onClick={() => void navigator.clipboard?.writeText(m.text)}
+                >
+                  <Copy className="size-3.5" strokeWidth={2} aria-hidden />
+                </button>
+              </div>
             </div>
-          </div>
-        ))}
+          ) : (
+            <div key={m.id} className="group/message flex w-full select-text flex-col gap-1 py-1">
+              <div className="px-6">
+                <div className="text-sm leading-[1.4] tracking-[-0.14px] text-neutral-100">
+                  <div className="space-y-2 whitespace-normal">
+                    <p className="my-[0.35em] whitespace-pre-wrap leading-[1.6]">{m.text}</p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )
+        )}
 
         {pendingOperations && (
-          <div className="mt-2 bg-neutral-700/50 border border-neutral-600 rounded-lg p-3">
-            <div className="text-xs text-neutral-300">
-              {flowyAgentMode === "auto" ? "Auto" : "Assist"} · {pendingOperations.length} proposed operation
-              {pendingOperations.length !== 1 ? "s" : ""}
-            </div>
-            {pendingExplanation && (
-              <div className="text-xs text-neutral-400 mt-1 whitespace-pre-wrap">{pendingExplanation}</div>
-            )}
-
-            <div className="mt-3 flex items-start justify-between gap-3">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-[11px] text-neutral-400">Apply:</span>
-                  <button
-                    type="button"
-                    className={`px-2 py-1 rounded-lg text-[11px] border transition-colors ${
-                      applyMode === "manual"
-                        ? "bg-blue-900/20 border-blue-700/50 text-blue-200"
-                        : "bg-neutral-800/30 border-neutral-700 text-neutral-300 hover:text-neutral-100"
-                    }`}
-                    onClick={() => {
-                      stopAutoRun();
-                      setApplyMode("manual");
-                    }}
-                    aria-pressed={applyMode === "manual"}
-                  >
-                    Manual
-                  </button>
-                  <button
-                    type="button"
-                    className={`px-2 py-1 rounded-lg text-[11px] border transition-colors ${
-                      applyMode === "auto"
-                        ? "bg-green-900/20 border-green-700/50 text-green-200"
-                        : "bg-neutral-800/30 border-neutral-700 text-neutral-300 hover:text-neutral-100"
-                    }`}
-                    onClick={() => {
-                      setApplyMode("auto");
-                    }}
-                    aria-pressed={applyMode === "auto"}
-                  >
-                    Auto
-                  </button>
-
-                  <label className="ml-2 flex items-center gap-1.5 text-[11px] text-neutral-400 select-none">
-                    <input
-                      type="checkbox"
-                      className="accent-green-500"
-                      checked={autoContinue}
-                      onChange={(e) => setAutoContinue(e.target.checked)}
-                      disabled={applyMode !== "auto"}
-                    />
-                    Continue
-                  </label>
-                </div>
-
-                <div className="text-xs text-neutral-300">
-                  Step {Math.min(executionIndex + 1, pendingOperations.length)} / {pendingOperations.length}
-                  {executionIndex >= pendingOperations.length ? " (done)" : ""}
-                </div>
-                <div className="text-[11px] text-neutral-400 mt-1 whitespace-pre-wrap">
-                  {executionIndex >= pendingOperations.length
-                    ? "All edits applied."
-                    : describeOperation(pendingOperations[executionIndex])}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
+          <div className="group/message flex w-full select-text flex-col gap-4 py-1">
+            <div className="px-5">
+              <div className="flex flex-col">
                 <button
                   type="button"
-                  onClick={() => {
-                    stopAutoRun();
-                    setPendingOperations(null);
-                    setPendingExplanation(null);
-                    setPendingExecuteNodeIds(null);
-                    resetExecution();
-                  }}
-                  className="px-3 py-2 text-xs text-neutral-300 hover:text-neutral-100 transition-colors rounded-lg border border-neutral-600 bg-neutral-800/40"
+                  className="group/head flex w-fit cursor-pointer select-none items-center gap-1 rounded-lg py-0.5 text-left transition-colors hover:opacity-90"
+                  onClick={() => setPlannerTimelineOpen((o) => !o)}
+                  aria-expanded={plannerTimelineOpen}
                 >
-                  Cancel
-                </button>
-
-                {applyMode === "auto" && executionIndex < pendingOperations.length && (
-                  <button
-                    type="button"
-                    onClick={() => stopAutoRun()}
-                    disabled={!isExecutingStep}
-                    className="px-3 py-2 text-xs text-neutral-300 hover:text-neutral-100 transition-colors rounded-lg border border-neutral-600 bg-neutral-800/40 disabled:opacity-50 disabled:cursor-not-allowed"
-                    title="Stop auto-run"
+                  <div className="flex size-6 shrink-0 items-center justify-center text-neutral-200">
+                    <SquarePlus className="size-3.5" strokeWidth={2} aria-hidden />
+                  </div>
+                  <span className="text-xs font-medium leading-[1.4] tracking-[-0.12px] flowy-shimmer-text">
+                    {applyMode === "auto" && executionIndex < pendingOperations.length
+                      ? "Applying to canvas…"
+                      : "Waiting for approval"}
+                  </span>
+                  <span
+                    className={`inline-flex shrink-0 text-neutral-300 transition-transform duration-200 ${
+                      plannerTimelineOpen ? "rotate-90" : ""
+                    }`}
                   >
-                    Stop
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {applyMode === "manual" && executionIndex < pendingOperations.length && onApplyEdits && (
-              <div className="flex gap-2 mt-3">
-                <button
-                  type="button"
-                  onClick={handleApproveStep}
-                  disabled={isExecutingStep}
-                  className="flex-1 bg-green-600 hover:bg-green-500 text-white rounded-lg px-3 py-2 text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    <ChevronRight className="size-3.5" strokeWidth={2} aria-hidden />
+                  </span>
+                </button>
+                <div
+                  className="grid transition-[grid-template-rows] duration-300 ease-[cubic-bezier(0.19,1,0.22,1)]"
+                  style={{ gridTemplateRows: plannerTimelineOpen ? "1fr" : "0fr" }}
                 >
-                  {isExecutingStep ? "Applying..." : "Approve step"}
-                </button>
-              </div>
-            )}
-
-            {executionIndex >= pendingOperations.length && (
-              <div className="flex gap-2 mt-3">
-                {pendingExecuteNodeIds && pendingExecuteNodeIds.length > 0 && pendingRunApprovalRequired && applyMode === "manual" && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (!pendingExecuteNodeIds || !onRunNodeIds) return;
-                      onRunNodeIds(pendingExecuteNodeIds);
-                    }}
-                    className="flex-1 bg-green-600 hover:bg-green-500 text-white rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-                  >
-                    Approve run ({pendingExecuteNodeIds.length})
-                  </button>
-                )}
-
-                {(!pendingExecuteNodeIds || pendingExecuteNodeIds.length === 0 || !pendingRunApprovalRequired || applyMode !== "manual") && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      stopAutoRun();
-                      setPendingOperations(null);
-                      setPendingExplanation(null);
-                      setPendingExecuteNodeIds(null);
-                      resetExecution();
-                    }}
-                    className="flex-1 bg-blue-600 hover:bg-blue-500 text-white rounded-lg px-3 py-2 text-sm font-medium transition-colors"
-                  >
-                    Done
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Timeline */}
-            <div className="mt-3">
-              <div className="text-[11px] text-neutral-400 mb-2">Timeline</div>
-              <div className="grid grid-cols-1 gap-2">
-                {pendingOperations.map((op, idx) => {
-                  const status =
-                    idx < executionIndex ? "done" : idx === executionIndex ? "next" : "pending";
-                  const bg =
-                    status === "done"
-                      ? "bg-green-900/20 border-green-700/50 text-green-200"
-                      : status === "next"
-                        ? "bg-blue-900/20 border-blue-700/50 text-blue-200"
-                        : "bg-neutral-800/30 border-neutral-700 text-neutral-300";
-                  return (
-                    <div
-                      key={idx}
-                      className={`border rounded-lg p-2 text-[11px] ${bg}`}
-                      aria-current={status === "next"}
-                    >
-                      {idx + 1}. {describeOperation(op)}
+                  <div className="min-h-0 overflow-hidden">
+                    <div className="select-none pt-1.5">
+                      <div className="mb-3 flex flex-wrap items-center gap-2 px-0.5">
+                        <span className="text-[10px] uppercase tracking-wide text-neutral-500">Apply</span>
+                        <button
+                          type="button"
+                          className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                            applyMode === "manual"
+                              ? "bg-white/10 text-white"
+                              : "text-neutral-500 hover:text-neutral-300"
+                          }`}
+                          onClick={() => {
+                            stopAutoRun();
+                            setApplyMode("manual");
+                          }}
+                          aria-pressed={applyMode === "manual"}
+                        >
+                          Manual
+                        </button>
+                        <button
+                          type="button"
+                          className={`rounded-lg px-2 py-0.5 text-[11px] font-medium transition-colors ${
+                            applyMode === "auto"
+                              ? "bg-emerald-500/15 text-emerald-300"
+                              : "text-neutral-500 hover:text-neutral-300"
+                          }`}
+                          onClick={() => setApplyMode("auto")}
+                          aria-pressed={applyMode === "auto"}
+                        >
+                          Auto
+                        </button>
+                        <label className="ml-1 flex cursor-pointer items-center gap-1.5 text-[11px] text-neutral-500 select-none">
+                          <input
+                            type="checkbox"
+                            className="accent-emerald-500"
+                            checked={autoContinue}
+                            onChange={(e) => setAutoContinue(e.target.checked)}
+                            disabled={applyMode !== "auto"}
+                          />
+                          Continue
+                        </label>
+                      </div>
+                      {pendingOperations.map((op, idx) => {
+                        const status =
+                          idx < executionIndex ? "done" : idx === executionIndex ? "next" : "pending";
+                        const lineTop = idx === 0 ? "min-h-1.5 w-px" : "min-h-1.5 w-px flex-1 bg-white/15";
+                        const lineBot =
+                          idx === pendingOperations.length - 1 ? "min-h-1.5 w-px" : "min-h-1.5 w-px flex-1 bg-white/15";
+                        const labelClass =
+                          status === "next"
+                            ? "flowy-shimmer-text text-xs leading-tight"
+                            : status === "done"
+                              ? "text-xs leading-tight text-neutral-500 line-through decoration-neutral-600"
+                              : "text-xs leading-tight text-neutral-500";
+                        return (
+                          <div key={idx} className="flex" aria-current={status === "next" ? "step" : undefined}>
+                            <div className="flex w-6 shrink-0 flex-col items-center">
+                              <div className={lineTop} />
+                              <div className="flex size-6 shrink-0 items-center justify-center text-neutral-400">
+                                <SquarePlus className="size-3.5" strokeWidth={2} aria-hidden />
+                              </div>
+                              <div className={lineBot} />
+                            </div>
+                            <div className="min-w-0 flex-1 self-center py-2 pl-1">
+                              <span className={labelClass}>{describeOperation(op)}</span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
-                  );
-                })}
+                  </div>
+                </div>
               </div>
             </div>
           </div>
         )}
 
         <div ref={messagesEndRef} />
+          </div>
+        </div>
       </div>
 
       <div
@@ -973,8 +972,98 @@ export function FlowyAgentPanel({
         className="relative z-10 mt-auto w-full shrink-0 select-text border-t border-white/10"
         style={{ background: "#171717" }}
       >
-        <div aria-live="polite" aria-atomic="true" className="sr-only" />
-        <div className="relative w-full px-2 pb-1 pt-1">
+        <div
+          className="pointer-events-none absolute bottom-full left-0 right-0 h-12 bg-gradient-to-b from-transparent to-[#171717]"
+          aria-hidden
+        />
+        <div aria-live="polite" aria-atomic="true" className="sr-only">
+          {footerStatusText}
+        </div>
+        <div className="relative w-full">
+          {(pendingOperations || isPlanning) && (
+            <div
+              className="pointer-events-none absolute inset-x-2 bottom-full top-[-3rem] rounded-t-[1.25rem] border border-b-0 border-white/10 opacity-80 transition-opacity duration-300"
+              aria-hidden
+            />
+          )}
+          {pendingOperations && (
+            <div className="relative z-10 overflow-hidden px-3">
+              <div className="pointer-events-auto flex w-full items-center justify-between gap-2 py-2 pl-1 pr-0.5">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <div className="relative flex size-4 shrink-0 items-center justify-center rounded-full border border-white/15 bg-white/[0.06] backdrop-blur-sm">
+                    <LayoutGrid className="size-2.5 text-neutral-300" strokeWidth={2} aria-hidden />
+                  </div>
+                  <p className="truncate text-xs text-neutral-400">
+                    {executionIndex < pendingOperations.length
+                      ? applyMode === "auto"
+                        ? "Applying edits to the canvas…"
+                        : "How does this look? Apply each step when ready."
+                      : pendingExecuteNodeIds &&
+                          pendingExecuteNodeIds.length > 0 &&
+                          pendingRunApprovalRequired &&
+                          applyMode === "manual"
+                        ? "Run the connected nodes next?"
+                        : "All proposed edits are applied."}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
+                  <button
+                    type="button"
+                    aria-label="Dismiss proposed changes"
+                    className="flex h-7 shrink-0 cursor-pointer items-center gap-1 rounded-full py-1.5 pl-2 pr-1 text-[11px] text-neutral-400 transition-colors hover:bg-white/10"
+                    onClick={dismissPendingPlan}
+                  >
+                    <span className="leading-none">Cancel</span>
+                    <span className="rounded px-1 font-mono text-[10px] text-neutral-500">Esc</span>
+                  </button>
+                  {executionIndex < pendingOperations.length ? (
+                    <>
+                      {applyMode === "manual" && onApplyEdits && (
+                        <button
+                          type="button"
+                          onClick={() => void handleApproveStep()}
+                          disabled={isExecutingStep}
+                          className="flex h-7 shrink-0 items-center gap-1 rounded-xl border border-emerald-400/30 bg-emerald-500/[0.14] px-2.5 text-[11px] font-medium text-emerald-300 backdrop-blur-md transition-[filter] hover:brightness-125 disabled:cursor-not-allowed disabled:opacity-45"
+                        >
+                          {isExecutingStep ? "Applying…" : "Apply step"}
+                        </button>
+                      )}
+                      {applyMode === "auto" && isExecutingStep && (
+                        <button
+                          type="button"
+                          onClick={() => stopAutoRun()}
+                          className="flex h-7 shrink-0 items-center rounded-xl border border-white/10 bg-white/[0.06] px-2.5 text-[11px] font-medium text-neutral-200 hover:bg-white/10"
+                        >
+                          Stop
+                        </button>
+                      )}
+                    </>
+                  ) : pendingExecuteNodeIds &&
+                    pendingExecuteNodeIds.length > 0 &&
+                    pendingRunApprovalRequired &&
+                    applyMode === "manual" &&
+                    onRunNodeIds ? (
+                    <button
+                      type="button"
+                      onClick={() => void onRunNodeIds(pendingExecuteNodeIds)}
+                      className="flex h-7 shrink-0 items-center gap-1 rounded-xl border border-emerald-400/30 bg-emerald-500/[0.14] px-2.5 text-[11px] font-medium text-emerald-300 backdrop-blur-md transition-[filter] hover:brightness-125"
+                    >
+                      Run
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={dismissPendingPlan}
+                      className="flex h-7 shrink-0 items-center gap-1 rounded-xl border border-emerald-400/30 bg-emerald-500/[0.14] px-2.5 text-[11px] font-medium text-emerald-300 backdrop-blur-md transition-[filter] hover:brightness-125"
+                    >
+                      Done
+                    </button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+          <div className="relative z-10 w-full px-2 pb-2 pt-0">
           <form
             className="relative w-full overflow-visible rounded-[1.25rem] border border-white/10 bg-[#222222] pb-1.5 pl-3 pr-1.5 pt-3 shadow-inner backdrop-blur-[12px] focus-within:border-white/20"
             onSubmit={(e) => {
@@ -1076,6 +1165,7 @@ export function FlowyAgentPanel({
               </div>
             </div>
           </form>
+          </div>
         </div>
         <div
           className="px-3 pb-1.5 pt-0 text-center text-[12px] leading-snug text-neutral-600"
