@@ -36,6 +36,7 @@ export function ProjectsGrid({ searchQuery = "" }: { searchQuery?: string }) {
   const [activeFolderFilter, setActiveFolderFilter] = useState<string>("all");
   const [showMoveModal, setShowMoveModal] = useState(false);
   const [movingProjectId, setMovingProjectId] = useState<string | null>(null);
+  const [organizerLoaded, setOrganizerLoaded] = useState(false);
   const { show } = useToast();
 
   const load = async (pathOverride?: string) => {
@@ -50,7 +51,8 @@ export function ProjectsGrid({ searchQuery = "" }: { searchQuery?: string }) {
         );
         const data = await res.json();
         if (data.success) {
-          setCurrentPath(data.basePath ?? activePath);
+          const resolvedPath = data.basePath ?? activePath;
+          setCurrentPath(resolvedPath);
           if (Array.isArray(data.projects)) {
             setProjects(
               data.projects.map((p: { id: string; name: string; path: string; updatedAt: string; thumbnail?: string }) => ({
@@ -64,6 +66,35 @@ export function ProjectsGrid({ searchQuery = "" }: { searchQuery?: string }) {
             );
           } else {
             setProjects([]);
+          }
+
+          // Load organizer metadata from workspace path JSON first.
+          try {
+            const organizerRes = await fetch(
+              `/api/projects/organizer?path=${encodeURIComponent(resolvedPath)}`
+            );
+            const organizerData = await organizerRes.json();
+            if (organizerData?.success && organizerData?.state) {
+              const state = organizerData.state as OrganizerState;
+              setOrganizerFolders(Array.isArray(state.folders) ? state.folders : []);
+              setProjectFolderAssignments(
+                state.assignments && typeof state.assignments === "object"
+                  ? state.assignments
+                  : {}
+              );
+              localStorage.setItem(
+                ORGANIZER_STORAGE_KEY,
+                JSON.stringify({
+                  folders: Array.isArray(state.folders) ? state.folders : [],
+                  assignments:
+                    state.assignments && typeof state.assignments === "object"
+                      ? state.assignments
+                      : {},
+                })
+              );
+            }
+          } catch {
+            // keep local fallback state
           }
         } else {
           setProjects([]);
@@ -103,16 +134,25 @@ export function ProjectsGrid({ searchQuery = "" }: { searchQuery?: string }) {
       }
     } catch {
       // ignore corrupt organizer state
+    } finally {
+      setOrganizerLoaded(true);
     }
   }, []);
 
   useEffect(() => {
+    if (!organizerLoaded) return;
     const state: OrganizerState = {
       folders: organizerFolders,
       assignments: projectFolderAssignments,
     };
     localStorage.setItem(ORGANIZER_STORAGE_KEY, JSON.stringify(state));
-  }, [organizerFolders, projectFolderAssignments]);
+    if (!useFileSystem || !currentPath) return;
+    void fetch("/api/projects/organizer", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path: currentPath, state }),
+    });
+  }, [organizerFolders, projectFolderAssignments, organizerLoaded, useFileSystem, currentPath]);
 
   const visibleProjects = useMemo(() => {
     if (activeFolderFilter === "all") return projects;
@@ -416,16 +456,113 @@ export function ProjectsGrid({ searchQuery = "" }: { searchQuery?: string }) {
         <div className="grid grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-2 sm:gap-4 w-full">
           {filteredOrganizerFolders.map((folder) => {
             const count = projects.filter((p) => projectFolderAssignments[p.id] === folder.id).length;
+            const previewProjects = projects
+              .filter((p) => projectFolderAssignments[p.id] === folder.id)
+              .sort(
+                (a, b) =>
+                  new Date(b.updatedAt || 0).getTime() - new Date(a.updatedAt || 0).getTime()
+              )
+              .slice(0, 3);
             return (
-              <button
-                key={folder.id}
-                type="button"
-                onClick={() => setActiveFolderFilter(folder.id)}
-                className="aspect-tv rounded-md border border-white/10 bg-[#1c1c1c] p-3 text-left hover:bg-[#232323]"
-              >
-                <p className="text-sm font-medium text-white truncate">{folder.name}</p>
-                <p className="mt-1 text-xs text-neutral-400">{count} projects</p>
-              </button>
+              <div key={folder.id} className="w-full h-fit">
+                <button
+                  type="button"
+                  onClick={() => setActiveFolderFilter(folder.id)}
+                  className="w-full h-fit text-left"
+                >
+                  <div className="relative group/menu outline-none focus:outline-none focus-visible:outline-none focus:ring-0 focus-visible:ring-0">
+                    <div className="overflow-hidden relative cursor-pointer isolate rounded-2xl p-2 pb-2 transition-all duration-200 bg-[#1F1F1F] outline outline-white/[0.08] -outline-offset-1 hover:bg-[#232323]">
+                      <div
+                        className="relative w-full overflow-hidden rounded-xl"
+                        style={{
+                          aspectRatio: "4 / 3",
+                          background:
+                            "linear-gradient(136deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0) 100%), rgb(29, 36, 42)",
+                        }}
+                      >
+                        <div className="absolute inset-0" style={{ perspective: "400px" }}>
+                          <div
+                            className="absolute"
+                            style={{
+                              width: "37.3%",
+                              transformOrigin: "left top",
+                              left: "58.5%",
+                              top: "24.6%",
+                              zIndex: 3,
+                              transform: "rotate(15deg)",
+                            }}
+                          >
+                            <div className="w-full rounded-xl shadow-[-2px_-1px_10.5px_rgba(0,0,0,0.4)] outline outline-1 outline-[#CCCCCC]/50 relative bg-gradient-to-b from-[#CCCECE] to-[#939E9E] overflow-hidden" style={{ aspectRatio: "100 / 134" }}>
+                              {previewProjects[0] && "thumbnail" in previewProjects[0] && previewProjects[0].thumbnail ? (
+                                <img
+                                  src={previewProjects[0].thumbnail}
+                                  alt="Collection preview"
+                                  className="w-full h-full object-cover transition-opacity duration-200"
+                                />
+                              ) : null}
+                            </div>
+                          </div>
+                          <div
+                            className="absolute"
+                            style={{
+                              width: "37.3%",
+                              transformOrigin: "left top",
+                              left: "31.3%",
+                              top: "18.5%",
+                              zIndex: 2,
+                            }}
+                          >
+                            <div className="w-full rounded-xl shadow-[-2px_-1px_10.5px_rgba(0,0,0,0.4)] outline outline-1 outline-[#CCCCCC]/50 relative bg-gradient-to-b from-[#CCCECE] to-[#939E9E] overflow-hidden" style={{ aspectRatio: "100 / 134" }}>
+                              {previewProjects[1] && "thumbnail" in previewProjects[1] && previewProjects[1].thumbnail ? (
+                                <img
+                                  src={previewProjects[1].thumbnail}
+                                  alt="Collection preview"
+                                  className="w-full h-full object-cover transition-opacity duration-200"
+                                />
+                              ) : null}
+                            </div>
+                          </div>
+                          <div
+                            className="absolute"
+                            style={{
+                              width: "37.3%",
+                              transformOrigin: "left top",
+                              left: "5.6%",
+                              top: "37.9%",
+                              zIndex: 1,
+                              transform: "rotate(-15deg)",
+                            }}
+                          >
+                            <div className="w-full rounded-xl shadow-[-2px_-1px_10.5px_rgba(0,0,0,0.4)] outline outline-1 outline-[#CCCCCC]/50 relative bg-gradient-to-b from-[#CCCECE] to-[#939E9E] overflow-hidden" style={{ aspectRatio: "100 / 134" }}>
+                              {previewProjects[2] && "thumbnail" in previewProjects[2] && previewProjects[2].thumbnail ? (
+                                <img
+                                  src={previewProjects[2].thumbnail}
+                                  alt="Collection preview"
+                                  className="w-full h-full object-cover transition-opacity duration-200"
+                                />
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="absolute left-4 right-4 bottom-2 z-20">
+                        <div className="flex flex-col gap-1">
+                          <div className="flex items-center gap-1">
+                            <span className="text-sm font-semibold truncate text-white transition-colors">
+                              {folder.name}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between text-xs text-muted-foreground">
+                            <span>Organizer folder</span>
+                            <span className="text-[10px]">{count} Projets</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </button>
+              </div>
             );
           })}
           {filteredProjects.map((project) => (
@@ -460,8 +597,11 @@ export function ProjectsGrid({ searchQuery = "" }: { searchQuery?: string }) {
                 onClick={() => setActiveFolderFilter(folder.id)}
                 className="flex w-full items-center justify-between border-b border-white/10 px-4 py-3 text-left hover:bg-white/5"
               >
-                <span className="text-sm text-white">{folder.name}</span>
-                <span className="text-xs text-neutral-400">{count} projects</span>
+                <div className="min-w-0">
+                  <span className="block truncate text-sm font-semibold text-white">{folder.name}</span>
+                  <span className="text-xs text-neutral-400">Organizer folder</span>
+                </div>
+                <span className="text-xs text-neutral-400">{count} Projets</span>
               </button>
             );
           })}
