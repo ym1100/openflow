@@ -19,7 +19,6 @@ export const FLOWY_PLANNER_NODE_TYPES = [
   "imageCompare",
   "videoStitch",
   "easeCurve",
-  "videoTrim",
   "videoFrameGrab",
   "router",
   "switch",

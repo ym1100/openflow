@@ -114,7 +114,7 @@ export function VideoStitchNode({ id, data, selected }: NodeProps<VideoStitchNod
 
       if (sourceNode.type === "mediaInput") {
         videoData = (sourceNode.data as any).videoFile || null;
-      } else if (sourceNode.type === "generateVideo" || sourceNode.type === "easeCurve" || sourceNode.type === "videoStitch" || sourceNode.type === "videoTrim") {
+      } else if (sourceNode.type === "generateVideo" || sourceNode.type === "easeCurve" || sourceNode.type === "videoStitch") {
         videoData = (sourceNode.data as any).outputVideo || null;
       }
 

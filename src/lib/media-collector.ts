@@ -94,14 +94,6 @@ export function collectMediaItems(nodes: Node[]): MediaItem[] {
       }
     }
 
-    // VideoTrimNode: outputVideo
-    if (node.type === "videoTrim") {
-      const outputVideo = data.outputVideo as string | null | undefined;
-      if (outputVideo && isDisplayableUrl(outputVideo)) {
-        mediaItems.push({ url: outputVideo, type: "video", nodeId: node.id });
-      }
-    }
-
     // VideoFrameGrabNode: outputImage
     if (node.type === "videoFrameGrab") {
       const outputImage = data.outputImage as string | null | undefined;

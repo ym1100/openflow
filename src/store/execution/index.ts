@@ -33,6 +33,5 @@ export type { GenerateAudioOptions } from "./generateAudioExecutor";
 export {
   executeVideoStitch,
   executeEaseCurve,
-  executeVideoTrim,
   executeVideoFrameGrab,
 } from "./videoProcessingExecutors";

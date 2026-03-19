@@ -71,7 +71,6 @@ import {
   executeGenerateAudio,
   executeVideoStitch,
   executeEaseCurve,
-  executeVideoTrim,
   executeVideoFrameGrab,
   executeGlbViewer,
   executeRouter,
@@ -1168,9 +1167,6 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           case "easeCurve":
             await executeEaseCurve(executionCtx);
             break;
-          case "videoTrim":
-            await executeVideoTrim(executionCtx);
-            break;
           case "videoFrameGrab":
             await executeVideoFrameGrab(executionCtx);
             break;
@@ -1329,11 +1325,6 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         set({ isRunning: false, currentNodeIds: [] });
         await logger.endSession();
         return;
-      } else if (node.type === "videoTrim") {
-        await executeVideoTrim(executionCtx);
-        set({ isRunning: false, currentNodeIds: [] });
-        await logger.endSession();
-        return;
       } else if (node.type === "videoFrameGrab") {
         await executeVideoFrameGrab(executionCtx);
         set({ isRunning: false, currentNodeIds: [] });
@@ -1462,9 +1453,6 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
           break;
         case "easeCurve":
           await executeEaseCurve(executionCtx);
-          break;
-        case "videoTrim":
-          await executeVideoTrim(executionCtx);
           break;
         case "videoFrameGrab":
           await executeVideoFrameGrab(executionCtx);

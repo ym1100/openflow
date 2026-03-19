@@ -17,7 +17,6 @@ import {
   GenerateAudioNodeData,
   VideoStitchNodeData,
   EaseCurveNodeData,
-  VideoTrimNodeData,
   VideoFrameGrabNodeData,
   PromptNodeData,
   GLBViewerNodeData,
@@ -92,8 +91,6 @@ function getSourceOutput(
     return { type: "video", value: (sourceNode.data as VideoStitchNodeData).outputVideo };
   } else if (sourceNode.type === "easeCurve") {
     return { type: "video", value: (sourceNode.data as EaseCurveNodeData).outputVideo };
-  } else if (sourceNode.type === "videoTrim") {
-    return { type: "video", value: (sourceNode.data as VideoTrimNodeData).outputVideo };
   } else if (sourceNode.type === "prompt") {
     const d = sourceNode.data as PromptNodeData;
     return { type: "text", value: d.outputText ?? null };

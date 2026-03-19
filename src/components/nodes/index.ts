@@ -30,7 +30,6 @@ export { ImageCompareNode } from "./process/ImageCompareNode";
 // Video nodes
 export { VideoStitchNode } from "./video/VideoStitchNode";
 export { EaseCurveNode } from "./video/EaseCurveNode";
-export { VideoTrimNode } from "./video/VideoTrimNode";
 export { VideoFrameGrabNode } from "./video/VideoFrameGrabNode";
 
 // Route nodes

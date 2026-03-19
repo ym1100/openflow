@@ -33,7 +33,6 @@ import {
   ImageCompareNode,
   VideoStitchNode,
   EaseCurveNode,
-  VideoTrimNode,
   VideoFrameGrabNode,
   RouterNode,
   SwitchNode,
@@ -78,7 +77,6 @@ const nodeTypes: NodeTypes = {
   imageCompare: ImageCompareNode,
   videoStitch: VideoStitchNode,
   easeCurve: EaseCurveNode,
-  videoTrim: VideoTrimNode,
   videoFrameGrab: VideoFrameGrabNode,
   router: RouterNode,
   switch: SwitchNode,
@@ -143,8 +141,6 @@ const getNodeHandles = (nodeType: string): { inputs: string[]; outputs: string[]
       return { inputs: ["video", "audio"], outputs: ["video"] };
     case "easeCurve":
       return { inputs: ["video", "easeCurve"], outputs: ["video", "easeCurve"] };
-    case "videoTrim":
-      return { inputs: ["video"], outputs: ["video"] };
     case "videoFrameGrab":
       return { inputs: ["video"], outputs: ["image"] };
     case "router":
@@ -356,7 +352,6 @@ export function WorkflowCanvas() {
     imageCompare: 'Image Compare',
     videoStitch: 'Video Stitch',
     easeCurve: 'Ease Curve',
-    videoTrim: 'Video Trim',
     videoFrameGrab: 'Frame Grab',
     router: 'Router',
     switch: 'Switch',
@@ -505,7 +500,7 @@ export function WorkflowCanvas() {
         if (!targetNode) return false;
 
         const targetNodeType = targetNode.type;
-        if (targetNodeType === "generateVideo" || targetNodeType === "videoStitch" || targetNodeType === "easeCurve" || targetNodeType === "videoTrim" || targetNodeType === "videoFrameGrab" || targetNodeType === "router") {
+        if (targetNodeType === "generateVideo" || targetNodeType === "videoStitch" || targetNodeType === "easeCurve" || targetNodeType === "videoFrameGrab" || targetNodeType === "router") {
           return true;
         }
         // Video cannot connect to other node types
@@ -1096,10 +1091,6 @@ export function WorkflowCanvas() {
           sourceHandleIdForNewNode = "video";
         } else if (nodeType === "easeCurve") {
           // EaseCurve accepts video input and outputs video
-          targetHandleId = "video";
-          sourceHandleIdForNewNode = "video";
-        } else if (nodeType === "videoTrim") {
-          // VideoTrim accepts video input and outputs video
           targetHandleId = "video";
           sourceHandleIdForNewNode = "video";
         } else if (nodeType === "videoFrameGrab") {

@@ -59,7 +59,6 @@ export type NodeType =
   | "imageCompare"
   | "videoStitch"
   | "easeCurve"
-  | "videoTrim"
   | "videoFrameGrab"
   | "router"
   | "switch"
@@ -328,20 +327,6 @@ export interface EaseCurveNodeData extends BaseNodeData {
 }
 
 /**
- * Video Trim node - trims a video clip to a user-defined start/end time range
- */
-export interface VideoTrimNodeData extends BaseNodeData {
-  startTime: number;          // Trim start in seconds (default 0)
-  endTime: number;            // Trim end in seconds (default 0 = full duration, set on video load)
-  duration: number | null;    // Source video duration (populated when video loads metadata)
-  outputVideo: string | null; // Trimmed video blob URL or data URL
-  status: NodeStatus;
-  error: string | null;
-  progress: number;           // 0-100 processing progress
-  encoderSupported: boolean | null;
-}
-
-/**
  * Video Frame Grab node - extracts the first or last frame from a video as a full-resolution PNG image
  */
 export interface VideoFrameGrabNodeData extends BaseNodeData {
@@ -443,7 +428,6 @@ export type WorkflowNodeData =
   | ImageCompareNodeData
   | VideoStitchNodeData
   | EaseCurveNodeData
-  | VideoTrimNodeData
   | VideoFrameGrabNodeData
   | RouterNodeData
   | SwitchNodeData

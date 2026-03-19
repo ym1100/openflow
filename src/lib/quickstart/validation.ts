@@ -25,7 +25,6 @@ const VALID_NODE_TYPES: NodeType[] = [
   "imageCompare",
   "videoStitch",
   "easeCurve",
-  "videoTrim",
   "videoFrameGrab",
   "router",
   "switch",
@@ -49,7 +48,6 @@ const DEFAULT_DIMENSIONS: Record<NodeType, { width: number; height: number }> = 
   imageCompare: { width: 400, height: 360 },
   videoStitch: { width: SQUARE_SIZE, height: SQUARE_SIZE },
   easeCurve: { width: SQUARE_SIZE, height: SQUARE_SIZE },
-  videoTrim: { width: SQUARE_SIZE, height: SQUARE_SIZE },
   videoFrameGrab: { width: SQUARE_SIZE, height: SQUARE_SIZE },
   router: { width: 200, height: 80 },
   switch: { width: 220, height: 120 },
@@ -327,17 +325,6 @@ function createDefaultNodeData(type: NodeType): WorkflowNodeData {
         easingPreset: "easeInOutSine",
         inheritedFrom: null,
         outputDuration: 1.5,
-        outputVideo: null,
-        status: "idle",
-        error: null,
-        progress: 0,
-        encoderSupported: null,
-      };
-    case "videoTrim":
-      return {
-        startTime: 0,
-        endTime: 0,
-        duration: null,
         outputVideo: null,
         status: "idle",
         error: null,
