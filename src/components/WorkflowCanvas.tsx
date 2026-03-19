@@ -337,6 +337,11 @@ export function WorkflowCanvas() {
     });
   }, [nodes, dimmedNodeIds]);
 
+  const defaultEdgeOptions = useMemo(
+    () => ({ type: "editable" as const, animated: false }),
+    []
+  );
+
   // Node title mapping for FloatingNodeHeaders
   const NODE_TITLES: Record<string, string> = {
     mediaInput: 'Upload',
@@ -1922,10 +1927,7 @@ export function WorkflowCanvas() {
         elementsSelectable={!isModalOpen}
         className="bg-neutral-900"
         proOptions={{ hideAttribution: true }}
-        defaultEdgeOptions={{
-          type: "editable",
-          animated: false,
-        }}
+        defaultEdgeOptions={defaultEdgeOptions}
       >
         <SharedEdgeGradients />
         <GroupBackgroundsPortal />

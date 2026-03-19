@@ -168,6 +168,11 @@ interface WorkflowStore {
   // Node operations
   addNode: (type: NodeType, position: XYPosition, initialData?: Partial<WorkflowNodeData>) => string;
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => void;
+  /** Ensures node.style width/height meet minimums; returns true if the store was updated. */
+  ensureNodeMinDimensions: (
+    nodeId: string,
+    opts: { minWidth?: number; minHeight?: number }
+  ) => boolean;
   removeNode: (nodeId: string) => void;
   onNodesChange: (changes: NodeChange<WorkflowNode>[]) => void;
 
@@ -558,6 +563,41 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         }));
       }
     }
+  },
+
+  ensureNodeMinDimensions: (nodeId, opts) => {
+    const { nodes } = get();
+    const node = nodes.find((n) => n.id === nodeId);
+    if (!node) return false;
+
+    const curW =
+      (node.style?.width as number | undefined) ??
+      (typeof node.width === "number" ? node.width : 0);
+    const curH =
+      (node.style?.height as number | undefined) ??
+      (typeof node.height === "number" ? node.height : 0);
+
+    let nextStyle: Record<string, unknown> = { ...(node.style as Record<string, unknown> | undefined) };
+    let changed = false;
+
+    if (opts.minWidth != null && curW < opts.minWidth) {
+      nextStyle = { ...nextStyle, width: opts.minWidth };
+      changed = true;
+    }
+    if (opts.minHeight != null && curH < opts.minHeight) {
+      nextStyle = { ...nextStyle, height: opts.minHeight };
+      changed = true;
+    }
+
+    if (!changed) return false;
+
+    set({
+      nodes: nodes.map((n) =>
+        n.id === nodeId ? { ...n, style: nextStyle as WorkflowNode["style"] } : n
+      ),
+      hasUnsavedChanges: true,
+    });
+    return true;
   },
 
   removeNode: (nodeId: string) => {

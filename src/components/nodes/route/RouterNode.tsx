@@ -1,7 +1,7 @@
 "use client";
 
-import { memo, useMemo, useEffect } from "react";
-import { Handle, Position, useUpdateNodeInternals, useReactFlow, NodeProps } from "@xyflow/react";
+import { memo, useMemo, useLayoutEffect, useRef } from "react";
+import { Handle, Position, useUpdateNodeInternals, NodeProps } from "@xyflow/react";
 import { BaseNode } from "../shared/BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
 import type { WorkflowNode, RouterNodeData } from "@/types";
@@ -22,7 +22,8 @@ export const RouterNode = memo(({ id, data, selected }: NodeProps<WorkflowNode>)
   const edges = useWorkflowStore((state) => state.edges);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const updateNodeInternals = useUpdateNodeInternals();
-  const { setNodes } = useReactFlow();
+  const ensureNodeMinDimensions = useWorkflowStore((state) => state.ensureNodeMinDimensions);
+  const layoutSignatureRef = useRef<string | null>(null);
 
   // Derive active input types from incoming edge connections
   const activeInputTypes = useMemo(() => {
@@ -52,21 +53,20 @@ export const RouterNode = memo(({ id, data, selected }: NodeProps<WorkflowNode>)
   const lastHandleTop = baseOffset + (Math.max(totalHandleSlots, 1) - 1) * handleSpacing;
   const minHeight = lastHandleTop + 20;
 
-  // Resize node and notify React Flow when handle count changes
-  useEffect(() => {
-    setNodes((nodes) =>
-      nodes.map((node) => {
-        if (node.id === id) {
-          const currentHeight = (node.style?.height as number) || 0;
-          if (currentHeight < minHeight) {
-            return { ...node, style: { ...node.style, height: minHeight } };
-          }
-        }
-        return node;
-      })
-    );
-    updateNodeInternals(id);
-  }, [activeInputTypes.length, id, minHeight, setNodes, updateNodeInternals]);
+  // Controlled canvas: avoid useReactFlow().setNodes + unconditional updateNodeInternals — that
+  // ping-pongs with Zustand and triggers "Maximum update depth exceeded" in React Flow's StoreUpdater.
+  const handleLayoutKey = `${activeInputTypes.join("|")}:${minHeight}`;
+  useLayoutEffect(() => {
+    const resized = ensureNodeMinDimensions(id, { minHeight });
+    const layoutChanged =
+      layoutSignatureRef.current === null || layoutSignatureRef.current !== handleLayoutKey;
+    layoutSignatureRef.current = handleLayoutKey;
+
+    if (!layoutChanged && !resized) return;
+
+    const raf = requestAnimationFrame(() => updateNodeInternals(id));
+    return () => cancelAnimationFrame(raf);
+  }, [ensureNodeMinDimensions, handleLayoutKey, id, minHeight, updateNodeInternals]);
 
   return (
     <BaseNode

@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useMemo, useEffect, useState, useCallback } from "react";
+import { memo, useMemo, useEffect, useLayoutEffect, useState, useCallback, useRef } from "react";
 import { Handle, Position, useUpdateNodeInternals, useReactFlow, NodeProps } from "@xyflow/react";
 import { BaseNode } from "../shared/BaseNode";
 import { useWorkflowStore } from "@/store/workflowStore";
@@ -20,7 +20,9 @@ export const SwitchNode = memo(({ id, data, selected }: NodeProps<WorkflowNode>)
   const edges = useWorkflowStore((state) => state.edges);
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
   const updateNodeInternals = useUpdateNodeInternals();
-  const { setNodes, setEdges } = useReactFlow();
+  const { setEdges } = useReactFlow();
+  const ensureNodeMinDimensions = useWorkflowStore((state) => state.ensureNodeMinDimensions);
+  const layoutSignatureRef = useRef<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Derive inputType from incoming edge connection
@@ -50,21 +52,19 @@ export const SwitchNode = memo(({ id, data, selected }: NodeProps<WorkflowNode>)
   const lastHandleTop = baseOffset + (showOutputs ? switchCount * handleSpacing : handleSpacing);
   const minHeight = lastHandleTop + 40; // Extra space for add button
 
-  // Resize node and notify React Flow when switch count or inputType changes
-  useEffect(() => {
-    setNodes((nodes) =>
-      nodes.map((node) => {
-        if (node.id === id) {
-          const currentHeight = (node.style?.height as number) || 0;
-          if (currentHeight < minHeight) {
-            return { ...node, style: { ...node.style, height: minHeight } };
-          }
-        }
-        return node;
-      })
-    );
-    updateNodeInternals(id);
-  }, [switchCount, showOutputs, id, minHeight, setNodes, updateNodeInternals]);
+  // Controlled canvas: update Zustand + refresh handles only when layout/size actually changes.
+  const handleLayoutKey = `${switchCount}:${showOutputs}:${minHeight}`;
+  useLayoutEffect(() => {
+    const resized = ensureNodeMinDimensions(id, { minHeight });
+    const layoutChanged =
+      layoutSignatureRef.current === null || layoutSignatureRef.current !== handleLayoutKey;
+    layoutSignatureRef.current = handleLayoutKey;
+
+    if (!layoutChanged && !resized) return;
+
+    const raf = requestAnimationFrame(() => updateNodeInternals(id));
+    return () => cancelAnimationFrame(raf);
+  }, [ensureNodeMinDimensions, handleLayoutKey, id, minHeight, updateNodeInternals]);
 
   // Handle toggle change
   const handleToggle = useCallback(

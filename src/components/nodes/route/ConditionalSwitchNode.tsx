@@ -11,8 +11,10 @@ import type { WorkflowNode, ConditionalSwitchNodeData, ConditionalSwitchRule, Ma
 export const ConditionalSwitchNode = memo(({ id, data, selected }: NodeProps<WorkflowNode>) => {
   const nodeData = data as ConditionalSwitchNodeData;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const ensureNodeMinDimensions = useWorkflowStore((state) => state.ensureNodeMinDimensions);
   const updateNodeInternals = useUpdateNodeInternals();
-  const { setNodes, setEdges } = useReactFlow();
+  const { setEdges } = useReactFlow();
+  const layoutSignatureRef = useRef<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
 
   // Get incoming text via store selector so it recomputes when upstream node data changes
@@ -75,6 +77,17 @@ export const ConditionalSwitchNode = memo(({ id, data, selected }: NodeProps<Wor
     setHandleTops(positions);
   }, [ruleIds]);
 
+  // After DOM measurement updates handle pixel positions, refresh RF internals once per distinct layout.
+  const handleTopsSigRef = useRef<string>("");
+  useLayoutEffect(() => {
+    const sig = JSON.stringify(handleTops);
+    if (sig === handleTopsSigRef.current) return;
+    handleTopsSigRef.current = sig;
+    if (sig === "{}") return;
+    const raf = requestAnimationFrame(() => updateNodeInternals(id));
+    return () => cancelAnimationFrame(raf);
+  }, [handleTops, id, updateNodeInternals]);
+
   // Fallback handle positioning (used before first measurement)
   const handleSpacing = 32;
   const fallbackBase = 70; // approximate: header + padding + text preview + half row
@@ -85,21 +98,19 @@ export const ConditionalSwitchNode = memo(({ id, data, selected }: NodeProps<Wor
   const lastHandleTop = fallbackBase + totalOutputs * handleSpacing;
   const minHeight = lastHandleTop + 40; // Extra space for add button
 
-  // Resize node and notify React Flow when rule count changes
-  useEffect(() => {
-    setNodes((nodes) =>
-      nodes.map((node) => {
-        if (node.id === id) {
-          const currentHeight = (node.style?.height as number) || 0;
-          if (currentHeight < minHeight) {
-            return { ...node, style: { ...node.style, height: minHeight } };
-          }
-        }
-        return node;
-      })
-    );
-    updateNodeInternals(id);
-  }, [ruleCount, id, minHeight, setNodes, updateNodeInternals]);
+  // Controlled canvas: update Zustand + refresh handles only when layout/size actually changes.
+  const handleLayoutKey = `${ruleIds}:${minHeight}`;
+  useLayoutEffect(() => {
+    const resized = ensureNodeMinDimensions(id, { minHeight });
+    const layoutChanged =
+      layoutSignatureRef.current === null || layoutSignatureRef.current !== handleLayoutKey;
+    layoutSignatureRef.current = handleLayoutKey;
+
+    if (!layoutChanged && !resized) return;
+
+    const raf = requestAnimationFrame(() => updateNodeInternals(id));
+    return () => cancelAnimationFrame(raf);
+  }, [ensureNodeMinDimensions, handleLayoutKey, id, minHeight, ruleIds, updateNodeInternals]);
 
   // Handle rule value change (auto-unpauses evaluation)
   const handleRuleValueChange = useCallback(
