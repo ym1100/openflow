@@ -6,8 +6,11 @@ export const FLOWY_SESSIONS_KEY = "openflows-flowy-sessions";
 export const FLOWY_ACTIVE_SESSION_KEY = "openflows-flowy-active-session";
 export const FLOWY_CUSTOM_INSTRUCTIONS_KEY = "openflows-flowy-custom-instructions";
 export const FLOWY_DOCKED_KEY = "openflows-flowy-docked";
+export const FLOWY_AGENT_MODE_KEY = "openflows-flowy-agent-mode";
 
 export const FLOWY_MAX_STORED_SESSIONS = 50;
+
+export type FlowyAgentMode = "plan" | "assist" | "auto";
 
 export type StoredChatMsg = {
   id: string;
@@ -109,6 +112,26 @@ export function saveDockedPreference(docked: boolean): void {
   if (typeof window === "undefined") return;
   try {
     localStorage.setItem(FLOWY_DOCKED_KEY, docked ? "1" : "0");
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadFlowyAgentMode(): FlowyAgentMode {
+  if (typeof window === "undefined") return "assist";
+  try {
+    const v = localStorage.getItem(FLOWY_AGENT_MODE_KEY);
+    if (v === "plan" || v === "assist" || v === "auto") return v;
+  } catch {
+    /* ignore */
+  }
+  return "assist";
+}
+
+export function saveFlowyAgentMode(mode: FlowyAgentMode): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(FLOWY_AGENT_MODE_KEY, mode);
   } catch {
     /* ignore */
   }

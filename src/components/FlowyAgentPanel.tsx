@@ -1,16 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import type { EditOperation } from "@/lib/chat/editOperations";
-import { ChevronDown, Minus, MousePointerClick, PanelRightOpen, Settings2, SquarePen } from "lucide-react";
+import {
+  AtSign,
+  ChevronDown,
+  Minus,
+  MousePointerClick,
+  Paperclip,
+  PanelRightOpen,
+  Settings2,
+  SquarePen,
+} from "lucide-react";
 import {
   createEmptyFlowySession,
   loadCustomInstructions,
   loadDockedPreference,
+  loadFlowyAgentMode,
   loadFlowyPanelSessions,
   saveCustomInstructions,
   saveDockedPreference,
+  saveFlowyAgentMode,
   saveFlowyPanelSessions,
+  type FlowyAgentMode,
   type StoredChatSession,
 } from "@/lib/flowy/flowyPanelStorage";
 
@@ -113,6 +125,11 @@ export function FlowyAgentPanel({
     [sessions, activeSessionId]
   );
 
+  const [flowyAgentMode, setFlowyAgentMode] = useState<FlowyAgentMode>(() => loadFlowyAgentMode());
+  const flowyAgentModeRef = useRef(flowyAgentMode);
+  flowyAgentModeRef.current = flowyAgentMode;
+  const footerInputId = useId();
+
   const [isDocked, setIsDocked] = useState<boolean>(() => loadDockedPreference());
   const [isSettingsOpen, setIsSettingsOpen] = useState<boolean>(false);
   const [customInstructions, setCustomInstructions] = useState<string>(() => loadCustomInstructions());
@@ -177,6 +194,10 @@ export function FlowyAgentPanel({
   useEffect(() => {
     saveDockedPreference(isDocked);
   }, [isDocked]);
+
+  useEffect(() => {
+    saveFlowyAgentMode(flowyAgentMode);
+  }, [flowyAgentMode]);
 
   useEffect(() => {
     if (!historyMenuOpen) return;
@@ -258,6 +279,7 @@ export function FlowyAgentPanel({
 
       // Bind this request to the chat that was active when it started (survives session switches while the plan API is in flight).
       const sessionId = activeSessionIdRef.current;
+      const agentModeAtStart = flowyAgentModeRef.current;
 
       setErrorMessage(null);
       setIsPlanning(true);
@@ -277,6 +299,7 @@ export function FlowyAgentPanel({
               : trimmed,
             workflowState: stateForRequest,
             selectedNodeIds: contextNodeIds,
+            agentMode: agentModeAtStart,
           }),
         });
 
@@ -297,8 +320,12 @@ export function FlowyAgentPanel({
         }
 
         const assistantText = data.assistantText ?? "";
-        const ops = data.operations ?? [];
-        const mode: "chat" | "plan" = data.mode === "chat" ? "chat" : "plan";
+        let ops = data.operations ?? [];
+        let mode: "chat" | "plan" = data.mode === "chat" ? "chat" : "plan";
+        if (agentModeAtStart === "plan") {
+          mode = "chat";
+          ops = [];
+        }
 
         if (mode === "chat") {
           setPendingOperations(null);
@@ -355,6 +382,19 @@ export function FlowyAgentPanel({
     // Increment run id so any in-flight auto loop will stop.
     autoRunIdRef.current += 1;
   }, []);
+
+  useEffect(() => {
+    if (flowyAgentMode === "auto") {
+      setApplyMode("auto");
+      setAutoContinue(true);
+    } else {
+      stopAutoRun();
+      setApplyMode("manual");
+      if (flowyAgentMode === "plan") {
+        setAutoContinue(false);
+      }
+    }
+  }, [flowyAgentMode, stopAutoRun]);
 
   const sleep = useCallback((ms: number) => new Promise((r) => setTimeout(r, ms)), []);
 
@@ -589,6 +629,14 @@ export function FlowyAgentPanel({
     autoContinueCountRef.current = 0;
   }, [createSession]);
 
+  const modeSliderIndex = flowyAgentMode === "assist" ? 0 : flowyAgentMode === "auto" ? 1 : 2;
+  const chatInputPlaceholder =
+    flowyAgentMode === "plan"
+      ? "Brainstorm workflows, prompts, and tradeoffs. Use @ to mention nodes."
+      : flowyAgentMode === "auto"
+        ? "Describe the outcome — Flowy can build and run. Use @ to mention nodes."
+        : "Co-build the canvas with approval each step. Use @ to mention nodes.";
+
   if (!isOpen) return null;
 
   return (
@@ -713,9 +761,25 @@ export function FlowyAgentPanel({
         )}
 
         {chatMessages.length === 0 && !errorMessage && (
-          <div className="text-center text-neutral-500 text-sm py-8">
-            <p>Ask Flowy to modify your workflow.</p>
-            <p className="text-xs mt-2">Example: “Make a video from this image with a cinematic style.”</p>
+          <div className="text-center text-neutral-500 text-sm py-8 px-2">
+            {flowyAgentMode === "plan" ? (
+              <>
+                <p className="text-neutral-400">Plan mode — advice only (no canvas edits).</p>
+                <p className="text-xs mt-2">
+                  Example: “Give me a 3-node workflow for a product ad, with prompts to paste.”
+                </p>
+              </>
+            ) : flowyAgentMode === "auto" ? (
+              <>
+                <p className="text-neutral-400">Auto mode — Flowy can add nodes, connect, and run.</p>
+                <p className="text-xs mt-2">Example: “Turn this prompt into a video workflow with 3 variations.”</p>
+              </>
+            ) : (
+              <>
+                <p className="text-neutral-400">Assist mode — step-by-step canvas changes with your approval.</p>
+                <p className="text-xs mt-2">Example: “Add three nanoBanana nodes from this image, then I’ll pick one.”</p>
+              </>
+            )}
           </div>
         )}
 
@@ -734,7 +798,8 @@ export function FlowyAgentPanel({
         {pendingOperations && (
           <div className="mt-2 bg-neutral-700/50 border border-neutral-600 rounded-lg p-3">
             <div className="text-xs text-neutral-300">
-              Assist mode: {pendingOperations.length} operation{pendingOperations.length !== 1 ? "s" : ""}
+              {flowyAgentMode === "auto" ? "Auto" : "Assist"} · {pendingOperations.length} proposed operation
+              {pendingOperations.length !== 1 ? "s" : ""}
             </div>
             {pendingExplanation && (
               <div className="text-xs text-neutral-400 mt-1 whitespace-pre-wrap">{pendingExplanation}</div>
@@ -903,41 +968,124 @@ export function FlowyAgentPanel({
         <div ref={messagesEndRef} />
       </div>
 
-      <div className="border-t border-white/10 p-3">
-        <form
-          className="flex gap-2"
-          onSubmit={(e) => {
-            e.preventDefault();
-            handlePlan();
-          }}
+      <div
+        data-testid="flowy-sidebar-footer"
+        className="relative z-10 mt-auto w-full shrink-0 select-text border-t border-white/10"
+        style={{ background: "#171717" }}
+      >
+        <div aria-live="polite" aria-atomic="true" className="sr-only" />
+        <div className="relative w-full px-2 pb-1 pt-1">
+          <form
+            className="relative w-full overflow-visible rounded-[1.25rem] border border-white/10 bg-[#222222] pb-1.5 pl-3 pr-1.5 pt-3 shadow-inner backdrop-blur-[12px] focus-within:border-white/20"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void handlePlan();
+            }}
+          >
+            <div className="flex w-full flex-col gap-2.5">
+              <div className="relative w-full pr-2" data-flowy-chat-input>
+                <label htmlFor={footerInputId} className="sr-only">
+                  Chat message
+                </label>
+                <textarea
+                  id={footerInputId}
+                  rows={1}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void handlePlan();
+                    }
+                  }}
+                  placeholder={chatInputPlaceholder}
+                  disabled={isPlanning}
+                  className="max-h-[200px] min-h-[22px] w-full resize-none bg-transparent text-sm leading-snug text-neutral-100 outline-none placeholder:text-neutral-500"
+                />
+              </div>
+              <div className="flex w-full items-center gap-1">
+                <div
+                  className="relative grid w-[min(100%,13.75rem)] shrink-0 grid-cols-3 rounded-xl bg-[#313131] p-1"
+                  role="radiogroup"
+                  aria-label="Chat mode"
+                >
+                  <div className="pointer-events-none absolute inset-1" aria-hidden>
+                    <div
+                      className="h-full w-1/3 rounded-lg bg-white/10 transition-transform duration-200 ease-out"
+                      style={{ transform: `translateX(${modeSliderIndex * 100}%)` }}
+                    />
+                  </div>
+                  {(["assist", "auto", "plan"] as const).map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      role="radio"
+                      aria-checked={flowyAgentMode === m}
+                      onClick={() => setFlowyAgentMode(m)}
+                      className={`relative z-10 rounded-lg px-1 py-0.5 text-[11px] font-medium leading-[1.25] tracking-tight transition-colors outline-none focus-visible:ring-2 focus-visible:ring-white/25 ${
+                        flowyAgentMode === m ? "text-white" : "text-neutral-500 hover:text-neutral-300"
+                      }`}
+                    >
+                      {m === "assist" ? "Assist" : m === "auto" ? "Auto" : "Plan"}
+                    </button>
+                  ))}
+                </div>
+                <div className="min-w-0 flex-1" />
+                <div className="flex shrink-0 items-center gap-0.5">
+                  <button
+                    type="button"
+                    disabled
+                    className="flex size-8 items-center justify-center rounded-xl text-neutral-500 opacity-40"
+                    aria-label="Attach images (coming soon)"
+                    title="Coming soon"
+                  >
+                    <Paperclip className="size-4" strokeWidth={1.5} aria-hidden />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsNodePickerOpen(true)}
+                    className="flex size-8 items-center justify-center rounded-xl text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100"
+                    aria-label="Mention nodes"
+                    title="Mention nodes (@)"
+                  >
+                    <AtSign className="size-4" strokeWidth={1.5} aria-hidden />
+                  </button>
+                  <div className="relative ml-0.5 h-10 w-10 shrink-0">
+                    <div className="absolute inset-0 rounded-[1.25rem] bg-white/10 backdrop-blur-md">
+                      <button
+                        type="submit"
+                        disabled={isPlanning || !input.trim()}
+                        className="flex size-full items-center justify-center rounded-[1.15rem] p-1 text-white transition-opacity disabled:cursor-not-allowed disabled:opacity-45"
+                        aria-label="Send message"
+                      >
+                        <svg className="size-[22px]" fill="currentColor" viewBox="0 0 36 36" aria-hidden>
+                          <path
+                            clipRule="evenodd"
+                            fillRule="evenodd"
+                            d="M18 0C8.05887 0 0 8.05887 0 18C0 27.9411 8.05887 36 18 36C27.9411 36 36 27.9411 36 18C36 8.05887 27.9411 0 18 0ZM25.7025 16.8428C26.3415 17.4819 26.3415 18.518 25.7025 19.157C25.0634 19.796 24.0273 19.796 23.3883 19.157L19.6364 15.4051V24.5454C19.6364 25.4491 18.9038 26.1817 18 26.1817C17.0963 26.1817 16.3637 25.4491 16.3637 24.5454V15.4049L12.6116 19.157C11.9725 19.796 10.9364 19.796 10.2974 19.157C9.65834 18.518 9.65834 17.4819 10.2974 16.8428L16.8428 10.2974C17.0113 10.1289 17.2075 10.0048 17.4166 9.92517C17.6029 9.85424 17.7995 9.81855 17.9962 9.81811L17.9986 9.81811L18 9.8181C18.0151 9.8181 18.0301 9.81831 18.0451 9.81871C18.2321 9.82385 18.4184 9.86086 18.5951 9.92972C18.6217 9.94017 18.6508 9.95233 18.6767 9.96411C18.8098 10.0247 18.9335 10.1026 19.0447 10.1949C19.0833 10.227 19.1208 10.2612 19.157 10.2974L19.1681 10.3084L25.7025 16.8428Z"
+                          />
+                        </svg>
+                      </button>
+                    </div>
+                    <div
+                      aria-hidden
+                      className="pointer-events-none absolute inset-0 rounded-[1.25rem] border border-white/10"
+                    />
+                  </div>
+                </div>
+              </div>
+            </div>
+          </form>
+        </div>
+        <div
+          className="px-3 pb-1.5 pt-0 text-center text-[12px] leading-snug text-neutral-600"
+          style={{ background: "#171717" }}
         >
-          <button
-            type="button"
-            onClick={() => setIsNodePickerOpen(true)}
-            className="w-11 shrink-0 bg-neutral-700/40 hover:bg-neutral-700 text-neutral-200 rounded-lg border border-neutral-600 flex items-center justify-center"
-            title="Add @ node context"
-            aria-label="Add node context"
-          >
-            <span className="text-sm font-semibold">@</span>
-          </button>
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder="Message Flowy..."
-            className="flex-1 bg-neutral-700 border border-neutral-600 rounded-lg px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-blue-500"
-            disabled={isPlanning}
-          />
-          <button
-            type="submit"
-            disabled={isPlanning || !input.trim()}
-            className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-500 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8" />
-            </svg>
-          </button>
-        </form>
+          <span className="text-neutral-500">Flowy is experimental.</span>{" "}
+          <span className="text-neutral-600">
+            Plan = advice only · Assist = step-by-step · Auto = build &amp; run
+          </span>
+        </div>
       </div>
 
       {/* Custom instructions modal */}

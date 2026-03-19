@@ -171,7 +171,7 @@ Use descriptive handle IDs matching the data type:
 - **Allowlists:** `src/lib/flowy/planner_schema.json` — keep aligned with `src/lib/flowy/plannerAllowlist.ts` (run `npm run test:run -- src/lib/flowy/plannerSchema.test.ts`).
 - **Context:** The planner receives the full **edge list**, **group** metadata, and **nodesDetailed** (sanitized `data` near selection + graph neighbors) plus **nodesOutline** for other nodes. Tune with `FLOWY_MAX_CANVAS_CONTEXT_CHARS`, `FLOWY_CONTEXT_NEIGHBOR_HOPS`, `FLOWY_CONTEXT_FOCUS_MAX_NODES`.
 - **Intent router:** A first LLM pass (`ROUTER.md`) returns `mode: chat` (no ops) vs continues to planning (`mode: plan`). Disable with `FLOWY_SKIP_INTENT_ROUTER=1`. Optional: `FLOWY_ROUTER_MODEL`, `FLOWY_PLANNER_MODEL`.
-- **Panel UI:** Chat sessions, active session, custom instructions, and dock state persist in `localStorage` (`openflows-flowy-*` keys in `src/lib/flowy/flowyPanelStorage.ts`).
+- **Panel UI:** Chat sessions, active session, custom instructions, dock state, and **agent mode** (Assist / Auto / Plan) persist in `localStorage` (`openflows-flowy-*` keys in `src/lib/flowy/flowyPanelStorage.ts`).
 
 ## Adding New Kie.ai Models (SOP)
 

@@ -238,7 +238,13 @@ def _classify_user_intent(
     return out
 
 
-def _build_user_prompt(message: str, workflow_state: Dict[str, Any], selected_node_ids: List[str]) -> str:
+def _build_user_prompt(
+    message: str,
+    workflow_state: Dict[str, Any],
+    selected_node_ids: List[str],
+    *,
+    closing_instruction: str,
+) -> str:
     try:
         hops = int(os.environ.get("FLOWY_CONTEXT_NEIGHBOR_HOPS", "2"))
     except ValueError:
@@ -261,7 +267,50 @@ def _build_user_prompt(message: str, workflow_state: Dict[str, Any], selected_no
         "Current workflow (JSON). Use nodesDetailed for full context near the user's selection; "
         "nodesOutline lists other nodes by id/type only; edges are the full graph.\n"
         f"{canvas_json}\n\n"
-        "Return the planned edit operations as a single JSON object."
+        f"{closing_instruction}"
+    )
+
+
+CLOSE_CANVAS_PLAN = "Return the planned edit operations as a single JSON object."
+
+CLOSE_PLAN_ADVISOR = (
+    "MODE: PLAN (advisory only). Do not output edit operations or claim the canvas changed.\n"
+    'Return ONLY valid JSON: {"assistantText":"..."} — a single string with your full answer.'
+)
+
+
+def _run_plan_advisor_only(
+    model: Any,
+    message: str,
+    workflow_state: Dict[str, Any],
+    selected_node_ids: List[str],
+) -> str:
+    advisor = _read_text_file("PLAN_ADVISOR.md").strip()
+    if not advisor:
+        advisor = "You are a workflow planning assistant. Advise only; do not claim canvas edits."
+    system_prompt = advisor + "\n\nReturn ONLY JSON: {\"assistantText\": \"...\"}."
+    user_prompt = _build_user_prompt(
+        message,
+        workflow_state,
+        selected_node_ids,
+        closing_instruction=CLOSE_PLAN_ADVISOR,
+    )
+    resp = model.invoke(
+        [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)],
+        response_format={"type": "json_object"},
+    )
+    raw = str(getattr(resp, "content", "") or "")
+    try:
+        data = json.loads(raw)
+    except Exception:
+        data = _safe_extract_first_json_object(raw)
+    if isinstance(data, dict):
+        text = data.get("assistantText")
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    return (
+        "I can help you design that workflow step by step. "
+        "Tell me your goal (e.g. image → video) and any constraints (models, style, length)."
     )
 
 
@@ -271,6 +320,9 @@ def main() -> None:
         message = payload.get("message") or ""
         workflow_state = payload.get("workflowState") or {"nodes": [], "edges": []}
         selected_node_ids = payload.get("selectedNodeIds") or []
+        agent_mode = str(payload.get("agentMode") or "assist").strip().lower()
+        if agent_mode not in {"plan", "assist", "auto"}:
+            agent_mode = "assist"
 
         openai_key = os.environ.get("OPENAI_API_KEY")
         if not openai_key:
@@ -302,11 +354,31 @@ def main() -> None:
             temperature=0.1,
         )
 
+        if agent_mode == "plan":
+            text = _run_plan_advisor_only(model, message, workflow_state, selected_node_ids)
+            sys.stdout.write(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "mode": "chat",
+                        "assistantText": text,
+                        "operations": [],
+                        "requiresApproval": False,
+                        "approvalReason": "",
+                        "runApprovalRequired": False,
+                        "agentMode": "plan",
+                    }
+                )
+            )
+            return
+
         skip_router = os.environ.get("FLOWY_SKIP_INTENT_ROUTER", "").strip().lower() in {
             "1",
             "true",
             "yes",
         }
+        if agent_mode == "auto":
+            skip_router = True
         if not skip_router:
             route = _classify_user_intent(router_model, message, workflow_state, selected_node_ids)
             if route and route.get("intent") == "conversation":
@@ -339,7 +411,12 @@ def main() -> None:
         last_text_debug: str = ""
 
         for attempt in range(3):
-            user_prompt = _build_user_prompt(message, workflow_state, selected_node_ids)
+            user_prompt = _build_user_prompt(
+                message,
+                workflow_state,
+                selected_node_ids,
+                closing_instruction=CLOSE_CANVAS_PLAN,
+            )
             if attempt > 0 and last_errors:
                 user_prompt += (
                     "\n\nYour previous operations were invalid:\n"
@@ -404,13 +481,18 @@ def main() -> None:
             "operations": parsed.get("operations", []),
             "requiresApproval": True,
             "approvalReason": parsed.get("approvalReason", "Assist mode: user approval required."),
+            "agentMode": agent_mode,
         }
         # Always include debug so the UI can show what the model returned.
         out["debugLastText"] = last_text_debug
         if parsed.get("executeNodeIds") is not None:
             out["executeNodeIds"] = parsed.get("executeNodeIds")
-        if parsed.get("runApprovalRequired") is not None:
-            out["runApprovalRequired"] = parsed.get("runApprovalRequired")
+        raw_run_approval = parsed.get("runApprovalRequired")
+        if raw_run_approval is not None:
+            out["runApprovalRequired"] = bool(raw_run_approval)
+        else:
+            # Auto mode: prefer running without an extra approval gate unless the model sets it.
+            out["runApprovalRequired"] = agent_mode != "auto"
         if not ok:
             out["error"] = parsed.get("error", "deep_agent_planning_failed")
 
