@@ -3,6 +3,9 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { EditOperation } from "@/lib/chat/editOperations";
+import { executeOperationWithMouse, type OrchestratorDeps } from "@/lib/flowy/agentCanvasOrchestrator";
+import { useReactFlow } from "@xyflow/react";
+import { useWorkflowStore } from "@/store/workflowStore";
 import {
   AtSign,
   Check,
@@ -13,7 +16,6 @@ import {
   LayoutGrid,
   Loader2,
   Minus,
-  MousePointerClick,
   Paperclip,
   PanelRightOpen,
   Settings2,
@@ -253,6 +255,22 @@ export function FlowyAgentPanel({
   workflowState?: WorkflowState;
   selectedNodeIds?: string[];
 }) {
+  const { screenToFlowPosition, setCenter, getViewport } = useReactFlow();
+  const storeUpdateNodeData = useWorkflowStore((s) => s.updateNodeData);
+
+  const flowToScreenPosition = useCallback(
+    (pos: { x: number; y: number }) => {
+      const vp = getViewport();
+      const pane = document.querySelector(".react-flow");
+      const rect = pane?.getBoundingClientRect() ?? { left: 0, top: 0 };
+      return {
+        x: pos.x * vp.zoom + vp.x + rect.left,
+        y: pos.y * vp.zoom + vp.y + rect.top,
+      };
+    },
+    [getViewport]
+  );
+
   const createSession = useCallback((title = "New Chat"): ChatSession => {
     const base = createEmptyFlowySession();
     return { ...base, title };
@@ -330,6 +348,8 @@ export function FlowyAgentPanel({
     y: 0,
     visible: true,
   });
+  const [clickRipple, setClickRipple] = useState<{ x: number; y: number; id: number } | null>(null);
+  const cursorPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isExecutingStep, setIsExecutingStep] = useState(false);
   const [cursorActionLabel, setCursorActionLabel] = useState<string>("agent");
   const [plannerProgress, setPlannerProgress] = useState<string | null>(null);
@@ -781,6 +801,34 @@ export function FlowyAgentPanel({
     setExecutionIndex(0);
   }, [describeOperation, onApplyEdits, pendingExecuteNodeIds, pendingOperations, updateSessionMessages]);
 
+  const orchestratorDeps = useMemo<OrchestratorDeps>(
+    () => ({
+      setCursor: (partial) => {
+        if (partial.x !== undefined || partial.y !== undefined) {
+          const x = partial.x ?? cursorPosRef.current.x;
+          const y = partial.y ?? cursorPosRef.current.y;
+          cursorPosRef.current = { x, y };
+          setCursor({ x, y, visible: true });
+        }
+        if (partial.actionLabel !== undefined) {
+          setCursorActionLabel(partial.actionLabel);
+        }
+        if (partial.clickRipple !== undefined) {
+          setClickRipple(partial.clickRipple);
+        }
+      },
+      getCursorPos: () => cursorPosRef.current,
+      sleep,
+      applyOps: (ops) => onApplyEdits?.(ops),
+      storeUpdateNodeData: (nodeId, data) => storeUpdateNodeData(nodeId, data),
+      screenToFlowPosition,
+      flowToScreenPosition,
+      setCenter: (x, y, opts) => setCenter(x, y, opts),
+      getViewportZoom: () => getViewport().zoom,
+    }),
+    [flowToScreenPosition, getViewport, onApplyEdits, screenToFlowPosition, setCenter, sleep, storeUpdateNodeData]
+  );
+
   const applyOperationAtIndex = useCallback(
     async (index: number) => {
       if (!pendingOperations || !onApplyEdits) return;
@@ -789,114 +837,14 @@ export function FlowyAgentPanel({
       const op = pendingOperations[index];
       setIsExecutingStep(true);
 
-      const actionLabels: Record<string, string> = {
-        addNode: "adding node",
-        removeNode: "removing",
-        updateNode: "editing",
-        addEdge: "connecting",
-        removeEdge: "disconnecting",
-        moveNode: "moving",
-        createGroup: "grouping",
-        deleteGroup: "ungrouping",
-        updateGroup: "editing group",
-        setNodeGroup: "assigning",
-      };
-      setCursorActionLabel(actionLabels[op.type] ?? "agent");
-
       try {
-        if (op.type !== "addNode") {
-          if (op.type === "removeNode" || op.type === "updateNode") {
-            const center = getNodeCenterScreen(op.nodeId);
-            const pos = center ?? getFallbackCursorScreen();
-            setCursor({ x: pos.x, y: pos.y, visible: true });
-            await sleep(140);
-          } else if (op.type === "addEdge") {
-            // Move cursor to the source first (then we'll move it to target after the edge is created).
-            const center = getNodeCenterScreen(op.source);
-            const pos = center ?? getFallbackCursorScreen();
-            setCursor({ x: pos.x, y: pos.y, visible: true });
-            await sleep(140);
-          }
-        }
-
-        if (op.type === "addNode") {
-          onApplyEdits([op]);
-          await sleep(50);
-
-          if (op.nodeId) {
-            const center = getNodeCenterScreen(op.nodeId);
-            const pos = center ?? getFallbackCursorScreen();
-            setCursor({ x: pos.x, y: pos.y, visible: true });
-            // brief settle time so the cursor motion feels "live"
-            await sleep(180);
-          }
-        } else {
-          if (op.type === "updateNode" && nodeTypeById.get(op.nodeId) === "prompt") {
-            const fullPrompt = (op.data as any)?.prompt;
-            if (typeof fullPrompt === "string" && fullPrompt.trim().length > 0) {
-              const baseData = { ...(op.data as any) };
-              const total = fullPrompt.length;
-              const steps = Math.max(8, Math.min(28, Math.ceil(total / 45)));
-              const stepSize = Math.max(4, Math.ceil(total / steps));
-
-              // Apply an initial empty prompt quickly so React Flow renders the "cursor typing" target.
-              const initialOp: any = {
-                ...op,
-                data: { ...baseData, prompt: "" },
-                __flowyTypingStart: true,
-              };
-              onApplyEdits([initialOp]);
-              await sleep(25);
-
-              for (let i = stepSize; i < total + 1; i += stepSize) {
-                const partial = fullPrompt.slice(0, Math.min(i, total));
-                const chunkOp: any = {
-                  ...op,
-                  data: { ...baseData, prompt: partial },
-                  __flowyTypingChunk: true,
-                };
-                onApplyEdits([chunkOp]);
-                await sleep(18);
-              }
-
-              // Ensure the final prompt is exactly correct.
-              const finalOp: any = {
-                ...op,
-                data: { ...baseData, prompt: fullPrompt },
-                __flowyTypingChunk: true,
-              };
-              onApplyEdits([finalOp]);
-              await sleep(30);
-            } else {
-              // No prompt text to animate; apply directly.
-              onApplyEdits([op]);
-              await sleep(50);
-            }
-          } else {
-            onApplyEdits([op]);
-            await sleep(50);
-          }
-
-          const targetNodeId = op.type === "removeNode" || op.type === "updateNode" ? op.nodeId : undefined;
-          if (targetNodeId) {
-            const center = getNodeCenterScreen(targetNodeId);
-            const pos = center ?? getFallbackCursorScreen();
-            setCursor({ x: pos.x, y: pos.y, visible: true });
-            await sleep(140);
-          } else if (op.type === "addEdge") {
-            const t = getNodeCenterScreen(op.target);
-            const pos = t ?? getFallbackCursorScreen();
-            setCursor({ x: pos.x, y: pos.y, visible: true });
-            await sleep(160);
-          }
-        }
-
+        await executeOperationWithMouse(op, orchestratorDeps);
         setExecutionIndex(index + 1);
       } finally {
         setIsExecutingStep(false);
       }
     },
-    [getFallbackCursorScreen, getNodeCenterScreen, nodeTypeById, onApplyEdits, pendingOperations, sleep]
+    [onApplyEdits, orchestratorDeps, pendingOperations]
   );
 
   const handleApproveStep = useCallback(async () => {
@@ -1947,8 +1895,9 @@ export function FlowyAgentPanel({
         </div>
       )}
 
-      {/* Cursor overlay (purely visual, no DOM clicking) */}
+      {/* Agent mouse cursor */}
       {cursor.visible &&
+        isExecutingStep &&
         typeof document !== "undefined" &&
         createPortal(
           <div
@@ -1957,16 +1906,47 @@ export function FlowyAgentPanel({
               position: "fixed",
               left: cursor.x,
               top: cursor.y,
-              transform: "translate(-50%, -50%)",
               zIndex: 2147483647,
               pointerEvents: "none",
-              transition: "left 220ms ease, top 220ms ease, opacity 220ms ease",
-              opacity: isExecutingStep ? 1 : 0.95,
             }}
-            className="flex items-center gap-2 rounded-md border border-purple-700/70 bg-purple-900/45 shadow-[0_0_0_1px_rgba(255,255,255,0.08),0_8px_26px_rgba(76,29,149,0.45)] backdrop-blur px-2 py-1"
           >
-            <MousePointerClick size={18} color="#F3E8FF" />
-            <span className="text-[11px] text-purple-100 font-semibold">{cursorActionLabel}</span>
+            {/* Mouse pointer SVG — tip at (0,0) */}
+            <svg
+              width="24" height="24" viewBox="0 0 24 24" fill="none"
+              style={{ filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.5))" }}
+            >
+              <path d="M5 3l14 8.5-6.5 1.5L9 19.5 5 3z" fill="#a855f7" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round" />
+            </svg>
+            {/* Action label badge */}
+            <div
+              className="absolute left-5 top-5 whitespace-nowrap rounded-md border border-purple-700/70 bg-purple-900/80 px-2 py-0.5 text-[10px] font-semibold text-purple-100 shadow-lg backdrop-blur-sm"
+            >
+              {cursorActionLabel}
+            </div>
+          </div>,
+          document.body
+        )}
+
+      {/* Click ripple effect */}
+      {clickRipple &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            key={clickRipple.id}
+            aria-hidden="true"
+            style={{
+              position: "fixed",
+              left: clickRipple.x,
+              top: clickRipple.y,
+              transform: "translate(-50%, -50%)",
+              zIndex: 2147483646,
+              pointerEvents: "none",
+            }}
+          >
+            <div
+              className="h-8 w-8 rounded-full border-2 border-purple-400/80 bg-purple-500/20 animate-ping"
+              style={{ animationDuration: "600ms", animationIterationCount: 1 }}
+            />
           </div>,
           document.body
         )}

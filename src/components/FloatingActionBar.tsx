@@ -92,6 +92,7 @@ function AllNodesMenu() {
                     onClick={() => handleAddNode(node.type)}
                     draggable
                     onDragStart={(e) => handleDragStart(e, node.type)}
+                    data-agent-node-type={node.type}
                     className="group w-full rounded-lg px-4 pl-2 flex h-[51px] justify-start gap-2 whitespace-normal bg-transparent font-normal text-[12px] text-neutral-200 hover:bg-white/10 transition-colors items-center text-left cursor-grab active:cursor-grabbing"
                   >
                     <div className="flex h-8 w-full min-w-0 items-center gap-2 text-left">
