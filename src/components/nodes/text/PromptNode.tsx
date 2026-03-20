@@ -151,6 +151,12 @@ export function PromptNode({ id, data, selected }: NodeProps<PromptNodeType>) {
 
   const displayedOutput = isEditingOutput ? localOutput : (nodeData.outputText ?? "");
   const isGenerating = nodeData.status === "loading";
+  const hasRunResult =
+    Boolean(nodeData.inputPrompt && nodeData.inputPrompt.trim().length > 0) ||
+    Boolean(nodeData.outputText && nodeData.outputText.trim().length > 0) ||
+    nodeData.status === "loading" ||
+    nodeData.status === "complete" ||
+    nodeData.status === "error";
 
   return (
     <>
@@ -165,9 +171,43 @@ export function PromptNode({ id, data, selected }: NodeProps<PromptNodeType>) {
         footerRight={<NodeRunButton nodeId={id} disabled={isRunning} />}
       >
         <div className="relative w-full h-full min-h-0 flex flex-col overflow-hidden rounded-xl">
-          {/* Main output area - like arty's text node */}
+          {/* Main area: pre-run = single prompt textarea, post-run = output textarea */}
           <div className="group/text relative flex-1 min-h-0 overflow-hidden rounded-t-xl bg-neutral-900/40">
-            {isGenerating ? (
+            {!hasRunResult ? (
+              <div className="relative w-full h-full">
+                <textarea
+                  ref={textareaRef}
+                  value={localPrompt}
+                  onChange={handleChange}
+                  onFocus={handleFocus}
+                  onBlur={handleBlur}
+                  onKeyDown={handleKeyDown}
+                  placeholder={selected ? `Try "${TEXT_EXAMPLE_PROMPT}" or type @ for variables` : ""}
+                  disabled={isGenerating}
+                  className="nodrag nopan nowheel w-full h-full p-3 pb-12 text-xs leading-relaxed text-neutral-100 bg-transparent rounded-xl resize-none focus:outline-none placeholder:text-neutral-500"
+                />
+                <div className="absolute bottom-2 left-2">
+                  <ConnectedImageThumbnails nodeId={id} />
+                </div>
+                {showAutocomplete && filteredAutocompleteVars.length > 0 && (
+                  <div
+                    className="absolute z-20 bg-neutral-800 border border-neutral-600 rounded shadow-xl max-h-32 overflow-y-auto"
+                    style={{ top: autocompletePosition.top, left: autocompletePosition.left }}
+                  >
+                    {filteredAutocompleteVars.map((v, i) => (
+                      <button
+                        key={v.nodeId}
+                        onMouseDown={(e) => { e.preventDefault(); handleAutocompleteSelect(v.name); }}
+                        className={`w-full px-3 py-2 text-left text-[11px] ${i === selectedAutocompleteIndex ? "bg-neutral-700" : "hover:bg-neutral-700"}`}
+                      >
+                        <span className="text-blue-400">@{v.name}</span>
+                        <span className="text-neutral-500 truncate block">{v.value || "(empty)"}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ) : isGenerating ? (
               <div className="w-full h-full flex items-center justify-center">
                 <svg className="w-4 h-4 animate-spin text-neutral-400" fill="none" viewBox="0 0 24 24">
                   <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3" />
@@ -216,44 +256,46 @@ export function PromptNode({ id, data, selected }: NodeProps<PromptNodeType>) {
             )}
           </div>
 
-          {/* Instructions / prompt area - like arty's bottom section */}
-          <div className="flex-shrink-0 border-t border-neutral-700/60">
-            {hasIncomingTextConnection ? (
-              <div className="max-h-20 overflow-y-auto p-2 text-[10px] text-neutral-400 whitespace-pre-wrap break-words bg-neutral-900/60">
-                {resolvedText || "No text from connected node"}
-              </div>
-            ) : (
-              <div className="relative">
-                <textarea
-                  ref={textareaRef}
-                  value={localPrompt}
-                  onChange={handleChange}
-                  onFocus={handleFocus}
-                  onBlur={handleBlur}
-                  onKeyDown={handleKeyDown}
-                  placeholder={`Try "${TEXT_EXAMPLE_PROMPT}" or type @ for variables`}
-                  className="nodrag nopan nowheel w-full p-2 text-[11px] leading-relaxed text-neutral-100 bg-neutral-900/60 rounded-b-xl resize-none focus:outline-none placeholder:text-neutral-500 min-h-[60px]"
-                />
-                {showAutocomplete && filteredAutocompleteVars.length > 0 && (
-                  <div
-                    className="absolute z-20 bg-neutral-800 border border-neutral-600 rounded shadow-xl max-h-32 overflow-y-auto"
-                    style={{ top: autocompletePosition.top, left: autocompletePosition.left }}
-                  >
-                    {filteredAutocompleteVars.map((v, i) => (
-                      <button
-                        key={v.nodeId}
-                        onMouseDown={(e) => { e.preventDefault(); handleAutocompleteSelect(v.name); }}
-                        className={`w-full px-3 py-2 text-left text-[11px] ${i === selectedAutocompleteIndex ? "bg-neutral-700" : "hover:bg-neutral-700"}`}
-                      >
-                        <span className="text-blue-400">@{v.name}</span>
-                        <span className="text-neutral-500 truncate block">{v.value || "(empty)"}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
+          {/* Instructions area appears after first run (bottom textarea) */}
+          {hasRunResult && (
+            <div className="flex-shrink-0 border-t border-neutral-700/60">
+              {hasIncomingTextConnection ? (
+                <div className="max-h-20 overflow-y-auto p-2 text-[10px] text-neutral-400 whitespace-pre-wrap break-words bg-neutral-900/60">
+                  {resolvedText || "No text from connected node"}
+                </div>
+              ) : (
+                <div className="relative">
+                  <textarea
+                    ref={textareaRef}
+                    value={localPrompt}
+                    onChange={handleChange}
+                    onFocus={handleFocus}
+                    onBlur={handleBlur}
+                    onKeyDown={handleKeyDown}
+                    placeholder={`Try "${TEXT_EXAMPLE_PROMPT}" or type @ for variables`}
+                    className="nodrag nopan nowheel w-full p-2 text-[11px] leading-relaxed text-neutral-100 bg-neutral-900/60 rounded-b-xl resize-none focus:outline-none placeholder:text-neutral-500 min-h-[60px]"
+                  />
+                  {showAutocomplete && filteredAutocompleteVars.length > 0 && (
+                    <div
+                      className="absolute z-20 bg-neutral-800 border border-neutral-600 rounded shadow-xl max-h-32 overflow-y-auto"
+                      style={{ top: autocompletePosition.top, left: autocompletePosition.left }}
+                    >
+                      {filteredAutocompleteVars.map((v, i) => (
+                        <button
+                          key={v.nodeId}
+                          onMouseDown={(e) => { e.preventDefault(); handleAutocompleteSelect(v.name); }}
+                          className={`w-full px-3 py-2 text-left text-[11px] ${i === selectedAutocompleteIndex ? "bg-neutral-700" : "hover:bg-neutral-700"}`}
+                        >
+                          <span className="text-blue-400">@{v.name}</span>
+                          <span className="text-neutral-500 truncate block">{v.value || "(empty)"}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           <button
             onClick={() => setShowVarDialog(true)}

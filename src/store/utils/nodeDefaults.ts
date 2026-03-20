@@ -35,7 +35,7 @@ export const defaultNodeDimensions: Record<NodeType, { width: number; height: nu
   audioInput: { width: 300, height: 200 },
   annotation: { width: 300, height: 280 },
   comment: { width: 420, height: 60 },
-  prompt: { width: 329, height: 371 },
+  prompt: { width: SQUARE_SIZE, height: SQUARE_SIZE },
   generateImage: { width: SQUARE_SIZE, height: SQUARE_SIZE },
   generateVideo: { width: SQUARE_SIZE, height: SQUARE_SIZE },
   generate3d: { width: 300, height: 300 },

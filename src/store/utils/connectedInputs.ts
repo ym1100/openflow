@@ -89,7 +89,10 @@ function getSourceOutput(
     return { type: "video", value: (sourceNode.data as EaseCurveNodeData).outputVideo };
   } else if (sourceNode.type === "prompt") {
     const d = sourceNode.data as PromptNodeData;
-    return { type: "text", value: d.outputText ?? null };
+    // Before the first LLM run, use prompt textarea content as downstream output.
+    // After a run, outputText becomes the canonical downstream value.
+    const fallbackPrompt = d.prompt?.trim() ? d.prompt : null;
+    return { type: "text", value: d.outputText ?? fallbackPrompt };
   } else if (sourceNode.type === "glbViewer") {
     return { type: "image", value: (sourceNode.data as GLBViewerNodeData).capturedImage };
   }
