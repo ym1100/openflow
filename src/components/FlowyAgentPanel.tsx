@@ -978,6 +978,17 @@ export function FlowyAgentPanel({
           )
         )}
 
+        {isPlanning && (
+          <div className="group/message flex w-full select-text flex-col gap-1 py-1">
+            <div className="px-6">
+              <div className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-neutral-300">
+                <Loader2 className="size-3.5 animate-spin" aria-hidden />
+                <span>Flowy is thinking...</span>
+              </div>
+            </div>
+          </div>
+        )}
+
         {pendingOperations && (
           <div className="group/message flex w-full select-text flex-col gap-4 py-1">
             <div className="px-5">

@@ -614,8 +614,8 @@ def main() -> None:
             "true",
             "yes",
         }
-        if agent_mode == "auto":
-            skip_router = True
+        # Router should run for assist/auto too, so normal conversation remains possible
+        # without forcing canvas edits on every message.
         if not skip_router:
             route = _classify_user_intent(router_model, message, workflow_state, selected_node_ids)
             if route and route.get("intent") == "conversation":
