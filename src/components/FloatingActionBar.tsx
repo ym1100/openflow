@@ -92,9 +92,16 @@ function AllNodesMenu() {
                     onClick={() => handleAddNode(node.type)}
                     draggable
                     onDragStart={(e) => handleDragStart(e, node.type)}
-                    className="w-full rounded-lg px-4 pl-2 flex h-[51px] justify-start gap-2 whitespace-normal bg-transparent font-normal text-[12px] text-neutral-200 hover:bg-white/10 transition-colors items-center text-left cursor-grab active:cursor-grabbing"
+                    className="group w-full rounded-lg px-4 pl-2 flex h-[51px] justify-start gap-2 whitespace-normal bg-transparent font-normal text-[12px] text-neutral-200 hover:bg-white/10 transition-colors items-center text-left cursor-grab active:cursor-grabbing"
                   >
-                    {node.label}
+                    <div className="flex h-8 w-full min-w-0 items-center gap-2 text-left">
+                      <span className="select-none shrink-0">
+                        {node.label}
+                      </span>
+                      <div className="min-w-0 flex-1 select-none truncate text-[10px] text-neutral-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                        {node.description}
+                      </div>
+                    </div>
                   </button>
                 ))}
               </div>

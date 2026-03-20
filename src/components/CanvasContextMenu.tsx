@@ -82,7 +82,7 @@ export function CanvasContextMenu({ position, nodeId, onClose }: CanvasContextMe
     "select-none px-3 py-2 text-[11px] text-neutral-400";
 
   const rowClassName =
-    "w-full rounded-lg px-4 pl-2 flex h-[51px] justify-start gap-2 whitespace-normal bg-transparent font-normal text-[12px] text-neutral-200 hover:bg-white/10 transition-colors items-center text-left";
+    "group w-full rounded-lg px-4 pl-2 flex h-[51px] justify-start gap-2 whitespace-normal bg-transparent font-normal text-[12px] text-neutral-200 hover:bg-white/10 transition-colors items-center text-left";
 
   const iconTileClassName =
     "flex h-8 w-8 items-center justify-center rounded-lg bg-neutral-950/60 p-2 text-neutral-300";
@@ -261,8 +261,13 @@ export function CanvasContextMenu({ position, nodeId, onClose }: CanvasContextMe
                 className={rowClassName}
               >
                 <div className={iconTileClassName}>{getNodeIcon(node.type)}</div>
-                <div className="relative flex h-8 items-center text-left">
-                  <span className="select-none truncate">{node.label}</span>
+                <div className="flex h-8 w-full min-w-0 items-center gap-2 text-left">
+                  <span className="select-none shrink-0">
+                    {node.label}
+                  </span>
+                  <div className="min-w-0 flex-1 select-none truncate text-[10px] text-neutral-400 opacity-0 transition-opacity duration-300 group-hover:opacity-100">
+                    {node.description}
+                  </div>
                 </div>
               </button>
             ))}
