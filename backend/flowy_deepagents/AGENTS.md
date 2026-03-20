@@ -38,6 +38,9 @@ Each operation MUST be one of:
 - Allowed handles: `image`, `text`, `audio`, `video`, `3d`, `easeCurve`, `reference`.
 - Only use node types that exist in this app:
   `mediaInput`, `annotation`, `comment`, `prompt`, `generateImage`, `generateVideo`, `generateAudio`, `imageCompare`, `easeCurve`, `router`, `switch`, `conditionalSwitch`, `generate3d`, `glbViewer`.
+- If uploaded images are provided in the prompt (`Uploaded images (JSON)`), and you need to place one on canvas, use:
+  `{"type":"addNode","nodeType":"mediaInput","nodeId":"...","position":{"x":...,"y":...},"data":{"mode":"image","imageFromAttachmentId":"<uploaded-image-id>"}}`
+  (backend will materialize `imageFromAttachmentId` into actual image data).
 
 ## What to do
 - Read the user's message and the **Current workflow** JSON in the user prompt:

@@ -37,6 +37,80 @@ def _read_stdin_json() -> Dict[str, Any]:
     return json.loads(raw)
 
 
+def _coerce_image_attachments(raw_attachments: Any) -> List[Dict[str, str]]:
+    """
+    Accept attachments from UI and keep only safe image data URLs.
+    Each output item: {id, name, mimeType, dataUrl}
+    """
+    out: List[Dict[str, str]] = []
+    if not isinstance(raw_attachments, list):
+        return out
+    for i, item in enumerate(raw_attachments):
+        if not isinstance(item, dict):
+            continue
+        data_url = str(item.get("dataUrl") or "")
+        if not data_url.startswith("data:image/"):
+            continue
+        att_id = str(item.get("id") or f"att-{i+1}")
+        out.append(
+            {
+                "id": att_id,
+                "name": str(item.get("name") or att_id),
+                "mimeType": str(item.get("mimeType") or "image/*"),
+                "dataUrl": data_url,
+            }
+        )
+    return out
+
+
+def _build_human_message_with_attachments(
+    text_prompt: str, attachments: List[Dict[str, str]]
+) -> HumanMessage:
+    if not attachments:
+        return HumanMessage(content=text_prompt)
+    content: List[Dict[str, Any]] = [{"type": "text", "text": text_prompt}]
+    for att in attachments[:6]:
+        content.append({"type": "image_url", "image_url": {"url": att["dataUrl"]}})
+    return HumanMessage(content=content)
+
+
+def _materialize_attachment_operations(
+    operations: List[Dict[str, Any]], attachments: List[Dict[str, str]]
+) -> List[Dict[str, Any]]:
+    """
+    Planner can emit addNode mediaInput with:
+      data.imageFromAttachmentId = "<id>"
+    We rewrite it to concrete image payload:
+      data.image = "data:image/..."
+      data.mode = "image"
+      data.filename = attachment name
+    """
+    if not attachments:
+        return operations
+    by_id = {a["id"]: a for a in attachments}
+    out: List[Dict[str, Any]] = []
+    for op in operations:
+        if (
+            isinstance(op, dict)
+            and op.get("type") == "addNode"
+            and op.get("nodeType") == "mediaInput"
+            and isinstance(op.get("data"), dict)
+        ):
+            data = dict(op["data"])
+            att_id = data.get("imageFromAttachmentId")
+            if isinstance(att_id, str) and att_id in by_id:
+                att = by_id[att_id]
+                data["mode"] = "image"
+                data["image"] = att["dataUrl"]
+                if not data.get("filename"):
+                    data["filename"] = att["name"]
+                data.pop("imageFromAttachmentId", None)
+                out.append({**op, "data": data})
+                continue
+        out.append(op)
+    return out
+
+
 def _safe_extract_first_json_object(text: str) -> Dict[str, Any]:
     if not text:
         return {}
@@ -383,6 +457,7 @@ def _build_user_prompt(
     message: str,
     workflow_state: Dict[str, Any],
     selected_node_ids: List[str],
+    attachments: Optional[List[Dict[str, str]]] = None,
     *,
     closing_instruction: str,
 ) -> str:
@@ -403,10 +478,27 @@ def _build_user_prompt(
     )
     canvas_json = json.dumps(canvas_ctx, ensure_ascii=False, indent=2)
 
+    attachments = attachments or []
+    attachments_brief = (
+        "Uploaded images (JSON):\n"
+        + json.dumps(
+            [
+                {"id": a["id"], "name": a["name"], "mimeType": a["mimeType"]}
+                for a in attachments
+            ],
+            ensure_ascii=False,
+            indent=2,
+        )
+        + "\n\n"
+        if attachments
+        else ""
+    )
+
     return (
         f"Message: {message}\n\n"
-        "Current workflow (JSON). Use nodesDetailed for full context near the user's selection; "
-        "nodesOutline lists other nodes by id/type only; edges are the full graph.\n"
+        + attachments_brief
+        + "Current workflow (JSON). Use nodesDetailed for full context near the user's selection; "
+        + "nodesOutline lists other nodes by id/type only; edges are the full graph.\n"
         f"{canvas_json}\n\n"
         f"{closing_instruction}"
     )
@@ -425,6 +517,7 @@ def _run_plan_advisor_only(
     message: str,
     workflow_state: Dict[str, Any],
     selected_node_ids: List[str],
+    attachments: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     advisor = _read_text_file("PLAN_ADVISOR.md").strip()
     if not advisor:
@@ -434,10 +527,11 @@ def _run_plan_advisor_only(
         message,
         workflow_state,
         selected_node_ids,
+        attachments=attachments,
         closing_instruction=CLOSE_PLAN_ADVISOR,
     )
     resp = model.invoke(
-        [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)],
+        [SystemMessage(content=system_prompt), _build_human_message_with_attachments(user_prompt, attachments or [])],
         response_format={"type": "json_object"},
     )
     raw = str(getattr(resp, "content", "") or "")
@@ -461,6 +555,7 @@ def main() -> None:
         message = payload.get("message") or ""
         workflow_state = payload.get("workflowState") or {"nodes": [], "edges": []}
         selected_node_ids = payload.get("selectedNodeIds") or []
+        attachments = _coerce_image_attachments(payload.get("attachments"))
         agent_mode = str(payload.get("agentMode") or "assist").strip().lower()
         if agent_mode not in {"plan", "assist", "auto"}:
             agent_mode = "assist"
@@ -497,7 +592,7 @@ def main() -> None:
         )
 
         if agent_mode == "plan":
-            text = _run_plan_advisor_only(model, message, workflow_state, selected_node_ids)
+            text = _run_plan_advisor_only(model, message, workflow_state, selected_node_ids, attachments)
             sys.stdout.write(
                 json.dumps(
                     {
@@ -557,6 +652,7 @@ def main() -> None:
                 message,
                 workflow_state,
                 selected_node_ids,
+                attachments=attachments,
                 closing_instruction=CLOSE_CANVAS_PLAN,
             )
             if attempt > 0 and last_errors:
@@ -567,7 +663,7 @@ def main() -> None:
                 )
             # JSON mode guarantees parseable JSON output (we still validate shape below).
             resp = model.invoke(
-                [SystemMessage(content=system_prompt), HumanMessage(content=user_prompt)],
+                [SystemMessage(content=system_prompt), _build_human_message_with_attachments(user_prompt, attachments)],
                 response_format={"type": "json_object"},
             )
             last_text = str(getattr(resp, "content", "") or "")
@@ -586,6 +682,8 @@ def main() -> None:
                 continue
 
             operations = candidate.get("operations", [])
+            operations = _materialize_attachment_operations(operations, attachments)
+            candidate["operations"] = operations
             validation = _validate_edit_operations(operations, workflow_state)
             toolbar_validation = _validate_toolbar_intent_plan(message, candidate, operations)
             combined_errors = [

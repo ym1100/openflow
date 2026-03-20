@@ -83,6 +83,13 @@ type ChatSession = {
   createdAt: number;
 };
 
+type ChatImageAttachment = {
+  id: string;
+  name: string;
+  mimeType: string;
+  dataUrl: string;
+};
+
 export function FlowyAgentPanel({
   isOpen,
   onClose,
@@ -157,6 +164,8 @@ export function FlowyAgentPanel({
   const [mentionedNodeIds, setMentionedNodeIds] = useState<string[]>([]);
   const [isNodePickerOpen, setIsNodePickerOpen] = useState(false);
   const [nodePickerQuery, setNodePickerQuery] = useState("");
+  const [imageAttachments, setImageAttachments] = useState<ChatImageAttachment[]>([]);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [plannerTimelineOpen, setPlannerTimelineOpen] = useState(true);
   const [cursor, setCursor] = useState<{ x: number; y: number; visible: boolean }>({
     x: 0,
@@ -319,6 +328,7 @@ export function FlowyAgentPanel({
             workflowState: stateForRequest,
             selectedNodeIds: contextNodeIds,
             agentMode: agentModeAtStart,
+            attachments: imageAttachments,
           }),
         });
 
@@ -374,7 +384,7 @@ export function FlowyAgentPanel({
         setIsPlanning(false);
       }
     },
-    [contextNodeIds, customInstructions, isPlanning, scrollToBottom, stateForRequest, updateSessionMessages]
+    [contextNodeIds, customInstructions, imageAttachments, isPlanning, scrollToBottom, stateForRequest, updateSessionMessages]
   );
 
   const handlePlan = useCallback(async () => {
@@ -384,7 +394,39 @@ export function FlowyAgentPanel({
     autoContinueCountRef.current = 0;
     setInput("");
     await requestPlan(trimmed);
+    setImageAttachments([]);
   }, [input, requestPlan]);
+
+  const handleImageFilesSelected = useCallback(
+    async (files: FileList | null) => {
+      if (!files || files.length === 0) return;
+      const selected = Array.from(files).filter((f) => f.type.startsWith("image/"));
+      if (selected.length === 0) return;
+
+      const next = await Promise.all(
+        selected.slice(0, 6).map(
+          (file) =>
+            new Promise<ChatImageAttachment>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onload = () => {
+                const dataUrl = String(reader.result || "");
+                resolve({
+                  id: `att-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+                  name: file.name,
+                  mimeType: file.type || "image/png",
+                  dataUrl,
+                });
+              };
+              reader.onerror = () => reject(new Error(`Failed to read ${file.name}`));
+              reader.readAsDataURL(file);
+            })
+        )
+      );
+      setImageAttachments((prev) => [...prev, ...next].slice(0, 6));
+      if (imageInputRef.current) imageInputRef.current.value = "";
+    },
+    []
+  );
 
   const handleApprove = useCallback(() => {
     // Keep for backward compatibility if a parent triggers bulk apply.
@@ -473,7 +515,18 @@ export function FlowyAgentPanel({
         return `Connect ${op.source} -> ${op.target}`;
       case "removeEdge":
         return `Remove connection (${op.edgeId})`;
+      case "moveNode":
+        return `Move node (${op.nodeId})`;
+      case "createGroup":
+        return `Create group (${op.nodeIds.length} nodes)`;
+      case "deleteGroup":
+        return `Delete group (${op.groupId})`;
+      case "updateGroup":
+        return `Update group (${op.groupId})`;
+      case "setNodeGroup":
+        return `Set group for node (${op.nodeId})`;
     }
+    return "Apply operation";
     },
     [nodeTypeById]
   );
@@ -1134,6 +1187,44 @@ export function FlowyAgentPanel({
                   </div>
                 </div>
               )}
+              {imageAttachments.length > 0 && (
+                <div
+                  role="list"
+                  aria-label="Attached images"
+                  className="-ml-3 -mr-1.5 -mt-1 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                >
+                  <div className="flex w-max gap-1.5 pb-1 pl-1.5 pr-1 pt-1">
+                    {imageAttachments.map((img) => (
+                      <span
+                        key={img.id}
+                        role="listitem"
+                        className="group/chip inline-flex shrink-0 items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] py-[3px] pl-1 pr-2"
+                        title={img.name}
+                      >
+                        <span className="size-7 overflow-hidden rounded-md border border-white/10">
+                          <img src={img.dataUrl} alt="" className="size-full object-cover" />
+                        </span>
+                        <span className="flex min-w-0 flex-col">
+                          <span className="max-w-[110px] truncate text-[11px] font-medium text-neutral-100">
+                            {img.name}
+                          </span>
+                          <span className="text-left text-[10px] text-neutral-400">Image</span>
+                        </span>
+                        <button
+                          type="button"
+                          className="hidden size-4 items-center justify-center rounded-full border border-white/10 bg-[#222] text-neutral-300 transition-colors hover:text-white group-hover/chip:flex"
+                          aria-label={`Remove ${img.name}`}
+                          onClick={() =>
+                            setImageAttachments((prev) => prev.filter((x) => x.id !== img.id))
+                          }
+                        >
+                          x
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="relative w-full pr-2" data-flowy-chat-input>
                 <label htmlFor={footerInputId} className="sr-only">
                   Chat message
@@ -1183,12 +1274,20 @@ export function FlowyAgentPanel({
                 </div>
                 <div className="min-w-0 flex-1" />
                 <div className="flex shrink-0 items-center gap-0.5">
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp,image/gif"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => void handleImageFilesSelected(e.target.files)}
+                  />
                   <button
                     type="button"
-                    disabled
-                    className="flex size-8 items-center justify-center rounded-xl text-neutral-500 opacity-40"
-                    aria-label="Attach images (coming soon)"
-                    title="Coming soon"
+                    className="flex size-8 items-center justify-center rounded-xl text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100"
+                    aria-label="Attach images"
+                    title="Attach images"
+                    onClick={() => imageInputRef.current?.click()}
                   >
                     <Paperclip className="size-4" strokeWidth={1.5} aria-hidden />
                   </button>

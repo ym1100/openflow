@@ -10,6 +10,12 @@ type PlanRequest = {
   message: string;
   workflowState?: { nodes: any[]; edges: any[]; groups?: Record<string, unknown> };
   selectedNodeIds?: string[];
+  attachments?: Array<{
+    id: string;
+    name?: string;
+    mimeType?: string;
+    dataUrl: string;
+  }>;
   /** `plan` = advisory only (no canvas ops). `assist` / `auto` = canvas planner. */
   agentMode?: "plan" | "assist" | "auto";
   projectId?: string;
