@@ -45,3 +45,27 @@ Each operation MUST be one of:
 - Plan a minimal set of operations to satisfy the request.
 - If the user asks to "clear" or "reset" the canvas, output operations that remove all nodes.
 
+## Toolbar capability mapping (important)
+When users ask for toolbar-style actions, implement them using operations + optional execution:
+
+- **Change model/settings** (provider/model/aspect ratio/resolution/params):
+  - Use `updateNode` on the target node data.
+- **Run a node/workflow after edits**:
+  - Put node ids in `executeNodeIds` (usually the target generation node).
+- **Upscale image**:
+  - Add a `generateImage` node with upscale prompt/settings.
+  - Add edge from source image output -> new node image input.
+  - Set `executeNodeIds` to the new node id.
+- **Split into grid**:
+  - Add multiple `mediaInput` nodes (image mode), one per tile.
+  - Add `reference` edges from source node -> each new tile node.
+- **Extract frame from video**:
+  - Add a `mediaInput` node (image mode) as frame output.
+  - Add a `reference` edge from video source -> new frame node.
+- **Ease curve adjustments**:
+  - Use `updateNode` for `bezierHandles`, `easingPreset`, `outputDuration`.
+- **Conditional switch rule edits**:
+  - Use `updateNode` for `rules` and related fields.
+
+If a requested toolbar action is currently disabled in UI, do not fake execution. Return an explanation in `assistantText` and either no operations or the closest supported edit-only plan.
+

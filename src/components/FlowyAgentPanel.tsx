@@ -242,16 +242,28 @@ export function FlowyAgentPanel({
     return Array.from(new Set([...selected, ...mentioned]));
   }, [selectedNodeIds, mentionedNodeIds]);
 
-  const selectedContextSummary = useMemo(() => {
-    const ids = contextNodeIds;
-    if (!workflowState || ids.length === 0) return null;
-    const types = workflowState.nodes
-      .filter((n) => ids.includes(n.id))
-      .map((n) => n.type)
-      .filter(Boolean);
-    const unique = Array.from(new Set(types));
-    return { count: ids.length, types: unique.slice(0, 4) };
-  }, [contextNodeIds, workflowState]);
+  const contextNodeChips = useMemo(() => {
+    if (!workflowState || contextNodeIds.length === 0) return [];
+    const selectedSet = new Set(selectedNodeIds ?? []);
+    const mentionedSet = new Set(mentionedNodeIds ?? []);
+    return contextNodeIds
+      .map((id) => {
+        const node = workflowState.nodes.find((n) => n.id === id);
+        if (!node) return null;
+        const customTitle = (node.data as any)?.customTitle;
+        const label =
+          typeof customTitle === "string" && customTitle.trim().length > 0
+            ? customTitle
+            : node.type;
+        return {
+          id,
+          label,
+          type: node.type,
+          source: selectedSet.has(id) ? "selected" : mentionedSet.has(id) ? "mentioned" : "context",
+        };
+      })
+      .filter(Boolean) as Array<{ id: string; label: string; type: string; source: "selected" | "mentioned" | "context" }>;
+  }, [contextNodeIds, mentionedNodeIds, selectedNodeIds, workflowState]);
 
   const nodeTypeById = useMemo(() => {
     const m = new Map<string, string>();
@@ -826,14 +838,6 @@ export function FlowyAgentPanel({
           style={{ touchAction: "pan-y", overflowAnchor: "none" as const }}
         >
           <div className="flex flex-col gap-6 py-4">
-        {selectedContextSummary && (
-          <div className="mx-4 rounded-xl border border-white/10 bg-white/[0.06] px-3 py-2 text-xs leading-snug text-neutral-300">
-            Using your selected node context ({selectedContextSummary.count} selected):
-            {" "}
-            {selectedContextSummary.types.length ? selectedContextSummary.types.join(", ") : "nodes"}
-          </div>
-        )}
-
         {errorMessage && (
           <div className="mx-4 rounded-xl border border-red-800/60 bg-red-950/40 p-3 text-sm text-red-200">
             {errorMessage}
@@ -1088,6 +1092,48 @@ export function FlowyAgentPanel({
             }}
           >
             <div className="flex w-full flex-col gap-2.5">
+              {contextNodeChips.length > 0 && (
+                <div
+                  role="list"
+                  aria-label="Selected nodes"
+                  className="-ml-3 -mr-1.5 -mt-3 overflow-x-auto [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+                >
+                  <div className="flex w-max gap-1.5 pb-1 pl-1.5 pr-1 pt-1.5">
+                    {contextNodeChips.map((chip) => {
+                      const isSelected = chip.source === "selected";
+                      return (
+                        <span
+                          key={chip.id}
+                          role="listitem"
+                          className="group/chip inline-flex shrink-0 items-center gap-1 rounded-xl border border-white/10 bg-white/[0.06] py-[3px] pl-1 pr-2"
+                          title={`${chip.label} (${chip.type})`}
+                        >
+                          <span className="flex min-w-0 flex-col">
+                            <span className="max-w-[120px] truncate text-[11px] font-medium text-neutral-100">
+                              {chip.label}
+                            </span>
+                            <span className="text-left text-[10px] text-neutral-400">
+                              {chip.type}
+                            </span>
+                          </span>
+                          {!isSelected && (
+                            <button
+                              type="button"
+                              className="hidden size-4 items-center justify-center rounded-full border border-white/10 bg-[#222] text-neutral-300 transition-colors hover:text-white group-hover/chip:flex"
+                              aria-label={`Remove ${chip.label}`}
+                              onClick={() =>
+                                setMentionedNodeIds((prev) => prev.filter((id) => id !== chip.id))
+                              }
+                            >
+                              x
+                            </button>
+                          )}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
               <div className="relative w-full pr-2" data-flowy-chat-input>
                 <label htmlFor={footerInputId} className="sr-only">
                   Chat message

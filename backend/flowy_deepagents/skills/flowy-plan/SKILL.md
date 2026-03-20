@@ -20,6 +20,18 @@ Produce a JSON-only response with (JSON object only, no markdown, no code fences
 Use `addNode`/`addEdge` for new graphs.
 Use `updateNode` to change an existing prompt node (e.g., setting its `prompt` text).
 Use `removeNode` to clear/reset the canvas.
+Use `executeNodeIds` to request node execution after planning edits.
+
+## Toolbar-style actions
+Map UI toolbar intents to planner outputs:
+- Model/provider/aspect/resolution/parameters change -> `updateNode`.
+- Upscale -> add `generateImage` node, connect source image edge, set `executeNodeIds` to new node.
+- Split into grid -> add multiple `mediaInput` image nodes + `reference` edges.
+- Extract frame (video) -> add one `mediaInput` image node + `reference` edge from video source.
+- Ease Curve tweaks -> `updateNode` fields (`bezierHandles`, `easingPreset`, `outputDuration`).
+- Conditional switch rules -> `updateNode` with updated `rules`.
+
+If user asks for a currently unsupported/disabled toolbar action, return a clear `assistantText` and avoid pretending it was executed.
 
 ## Genre / reference image requests
 If the message requests a "genre image" or "reference image":

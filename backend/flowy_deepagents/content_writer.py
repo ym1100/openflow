@@ -145,6 +145,106 @@ def _validate_edit_operations(operations: List[Dict[str, Any]], workflow_state: 
     return {"ok": not errors, "errors": errors}
 
 
+def _validate_toolbar_intent_plan(
+    message: str, parsed: Dict[str, Any], operations: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    """
+    Validate that common toolbar requests are expressed with the expected
+    operation pattern so the UI can apply them deterministically.
+    """
+    errors: List[str] = []
+    msg = (message or "").lower()
+
+    add_nodes = [op for op in operations if isinstance(op, dict) and op.get("type") == "addNode"]
+    add_edges = [op for op in operations if isinstance(op, dict) and op.get("type") == "addEdge"]
+    update_nodes = [op for op in operations if isinstance(op, dict) and op.get("type") == "updateNode"]
+    execute_ids = parsed.get("executeNodeIds")
+    execute_ids_list = execute_ids if isinstance(execute_ids, list) else []
+
+    asks_upscale = "upscale" in msg
+    asks_grid = "split into grid" in msg or ("grid" in msg and "split" in msg)
+    asks_extract_frame = "extract frame" in msg or ("frame" in msg and "video" in msg)
+    # Keep this explicit to avoid false positives on generic "model" mentions.
+    asks_model_tune = any(
+        k in msg
+        for k in [
+            "change model",
+            "switch model",
+            "set model",
+            "change provider",
+            "set provider",
+            "aspect ratio",
+            "resolution",
+            "temperature",
+            "max tokens",
+            "parameters",
+        ]
+    )
+    asks_ease = any(k in msg for k in ["ease curve", "bezier", "easing", "output duration"])
+    asks_switch_rules = (
+        "conditional switch" in msg
+        or "switch rules" in msg
+        or "edit rules" in msg
+    )
+
+    if asks_upscale:
+        has_upscale_add = any(op.get("nodeType") == "generateImage" for op in add_nodes)
+        has_image_edge = any(
+            op.get("sourceHandle") == "image" and op.get("targetHandle") == "image"
+            for op in add_edges
+        )
+        if not has_upscale_add:
+            errors.append("Upscale request must add a generateImage node.")
+        if not has_image_edge:
+            errors.append("Upscale request must connect image -> image edge.")
+        if len(execute_ids_list) == 0:
+            errors.append("Upscale request must include executeNodeIds for the new node.")
+
+    if asks_grid:
+        media_adds = [op for op in add_nodes if op.get("nodeType") == "mediaInput"]
+        ref_edges = [
+            op
+            for op in add_edges
+            if op.get("targetHandle") == "reference"
+        ]
+        if len(media_adds) < 2:
+            errors.append("Split-grid request should add multiple mediaInput nodes.")
+        if len(ref_edges) < 2:
+            errors.append("Split-grid request should add reference edges to grid nodes.")
+
+    if asks_extract_frame:
+        has_media_add = any(op.get("nodeType") == "mediaInput" for op in add_nodes)
+        has_reference_edge = any(op.get("targetHandle") == "reference" for op in add_edges)
+        if not has_media_add:
+            errors.append("Extract-frame request must add a mediaInput node.")
+        if not has_reference_edge:
+            errors.append("Extract-frame request must add a reference edge to the frame node.")
+
+    if asks_model_tune and len(update_nodes) == 0:
+        errors.append("Model/settings request should include updateNode operations.")
+
+    if asks_ease:
+        touched_ease = any(
+            isinstance(op.get("data"), dict)
+            and any(k in op.get("data", {}) for k in ["bezierHandles", "easingPreset", "outputDuration"])
+            for op in update_nodes
+        )
+        if not touched_ease:
+            errors.append(
+                "Ease-curve request should update bezierHandles/easingPreset/outputDuration via updateNode."
+            )
+
+    if asks_switch_rules:
+        touched_rules = any(
+            isinstance(op.get("data"), dict) and "rules" in op.get("data", {})
+            for op in update_nodes
+        )
+        if not touched_rules:
+            errors.append("Conditional-switch rule request should update rules via updateNode.")
+
+    return {"ok": not errors, "errors": errors}
+
+
 def _read_text_file(rel_path: str) -> str:
     abs_path = os.path.join(FLOWY_DEEPAGENTS_DIR, rel_path)
     try:
@@ -446,13 +546,18 @@ def main() -> None:
 
             operations = candidate.get("operations", [])
             validation = _validate_edit_operations(operations, workflow_state)
-            if validation.get("ok"):
+            toolbar_validation = _validate_toolbar_intent_plan(message, candidate, operations)
+            combined_errors = [
+                *(validation.get("errors") or []),
+                *(toolbar_validation.get("errors") or []),
+            ]
+            if validation.get("ok") and toolbar_validation.get("ok"):
                 parsed = candidate
                 validated_ok = True
                 break
 
             parsed = candidate
-            last_errors = validation.get("errors", ["validation_failed"])
+            last_errors = combined_errors or ["validation_failed"]
 
         ok = validated_ok
         if not parsed:
