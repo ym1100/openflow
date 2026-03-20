@@ -371,12 +371,14 @@ source = { virtual = "." }
 dependencies = [
     { name = "langchain-core" },
     { name = "langchain-openai" },
+    { name = "pydantic" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "langchain-core", specifier = ">=0.3.29" },
     { name = "langchain-openai", specifier = ">=0.2.14" },
+    { name = "pydantic", specifier = ">=2.0" },
 ]
 
 [[package]]

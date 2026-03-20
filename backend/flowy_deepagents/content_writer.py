@@ -6,15 +6,85 @@ import json
 import os
 import sys
 from collections import Counter
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
 
-from langchain_core.messages import HumanMessage, SystemMessage  # type: ignore
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # type: ignore
 from langchain_openai import ChatOpenAI  # type: ignore
+from pydantic import BaseModel, Field
 
-from canvas_context import build_canvas_context_for_llm, load_planner_schema
+from canvas_context import (
+    build_canvas_context_for_llm,
+    build_execution_digest_for_llm,
+    load_planner_schema,
+)
 
 
 FLOWY_DEEPAGENTS_DIR = os.path.join(os.path.dirname(__file__), "")
+
+
+class RouterIntentModel(BaseModel):
+    """Structured router output (OpenAI structured output / JSON schema)."""
+
+    intent: Literal["conversation", "canvas_edit"]
+    reply: str = ""
+    reason: str = ""
+
+
+class FlowyPlanJsonModel(BaseModel):
+    """Top-level planner JSON; operations stay as dicts for downstream validation."""
+
+    assistantText: str = ""
+    operations: List[Dict[str, Any]] = Field(default_factory=list)
+    requiresApproval: bool = True
+    approvalReason: str = ""
+    executeNodeIds: Optional[List[str]] = None
+    runApprovalRequired: Optional[bool] = None
+
+
+class PlanAdvisorJsonModel(BaseModel):
+    assistantText: str = ""
+
+
+def _normalize_chat_history(raw: Any) -> List[Dict[str, str]]:
+    if not isinstance(raw, list):
+        return []
+    out: List[Dict[str, str]] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            continue
+        role = str(item.get("role") or "").strip().lower()
+        text = item.get("text")
+        if role not in {"user", "assistant"}:
+            continue
+        if not isinstance(text, str) or not text.strip():
+            continue
+        out.append({"role": role, "text": text.strip()})
+    return out
+
+
+def _cap_chat_history(history: List[Dict[str, str]], max_turns: int, max_chars: int) -> List[Dict[str, str]]:
+    if not history or max_turns <= 0:
+        return []
+    chunk = history[-max_turns:]
+    total = 0
+    kept_rev: List[Dict[str, str]] = []
+    for turn in reversed(chunk):
+        tlen = len(turn["text"]) + 24
+        if total + tlen > max_chars and kept_rev:
+            break
+        kept_rev.append(turn)
+        total += tlen
+    return list(reversed(kept_rev))
+
+
+def _history_to_langchain_messages(history: List[Dict[str, str]]) -> List[Union[HumanMessage, AIMessage]]:
+    msgs: List[Union[HumanMessage, AIMessage]] = []
+    for h in history:
+        if h["role"] == "user":
+            msgs.append(HumanMessage(content=h["text"]))
+        else:
+            msgs.append(AIMessage(content=h["text"]))
+    return msgs
 
 
 @functools.lru_cache(maxsize=1)
@@ -401,6 +471,7 @@ def _build_workflow_brief_for_router(
         "nodeTypeCounts": type_counts,
         "nodesSample": sample,
         "nodesSampleIsPartial": len(nodes) > len(sample),
+        "nearEmptyCanvas": len(nodes) <= 1,
     }
 
 
@@ -409,6 +480,7 @@ def _classify_user_intent(
     message: str,
     workflow_state: Dict[str, Any],
     selected_node_ids: List[str],
+    chat_history: List[Dict[str, str]],
 ) -> Optional[Dict[str, Any]]:
     """
     LLM router: conversation vs canvas_edit.
@@ -427,11 +499,21 @@ def _classify_user_intent(
         f"UserMessage:\n{msg}\n\nWorkflowBrief (JSON):\n"
         f"{json.dumps(brief, ensure_ascii=False)}\n\nReturn ONLY the JSON object."
     )
+    lc_messages: List[Any] = [SystemMessage(content=router_md)]
+    lc_messages.extend(_history_to_langchain_messages(chat_history))
+    lc_messages.append(HumanMessage(content=user))
+
     try:
-        resp = router_model.invoke(
-            [SystemMessage(content=router_md), HumanMessage(content=user)],
-            response_format={"type": "json_object"},
-        )
+        structured = router_model.with_structured_output(RouterIntentModel)
+        parsed = structured.invoke(lc_messages)
+        if isinstance(parsed, RouterIntentModel):
+            out: Dict[str, Any] = {"intent": parsed.intent, "reason": parsed.reason, "reply": parsed.reply}
+            return out
+    except Exception:
+        pass
+
+    try:
+        resp = router_model.invoke(lc_messages, response_format={"type": "json_object"})
     except Exception:
         return None
 
@@ -447,10 +529,10 @@ def _classify_user_intent(
     reply = data.get("reply")
     if intent not in {"conversation", "canvas_edit"}:
         return None
-    out: Dict[str, Any] = {"intent": intent, "reason": data.get("reason")}
+    out_fb: Dict[str, Any] = {"intent": intent, "reason": data.get("reason")}
     if isinstance(reply, str):
-        out["reply"] = reply
-    return out
+        out_fb["reply"] = reply
+    return out_fb
 
 
 def _build_user_prompt(
@@ -478,6 +560,14 @@ def _build_user_prompt(
     )
     canvas_json = json.dumps(canvas_ctx, ensure_ascii=False, indent=2)
 
+    digest = build_execution_digest_for_llm(
+        workflow_state,
+        selected_node_ids=selected_node_ids,
+        neighbor_hops=hops,
+        focus_max_nodes=focus_max,
+    )
+    digest_json = json.dumps(digest, ensure_ascii=False, indent=2)
+
     attachments = attachments or []
     attachments_brief = (
         "Uploaded images (JSON):\n"
@@ -497,6 +587,8 @@ def _build_user_prompt(
     return (
         f"Message: {message}\n\n"
         + attachments_brief
+        + "Execution digest (focused nodes): status, errors, prompt previews, hasOutput* flags — no media payloads.\n"
+        f"{digest_json}\n\n"
         + "Current workflow (JSON). Use nodesDetailed for full context near the user's selection; "
         + "nodesOutline lists other nodes by id/type only; edges are the full graph.\n"
         f"{canvas_json}\n\n"
@@ -518,6 +610,7 @@ def _run_plan_advisor_only(
     workflow_state: Dict[str, Any],
     selected_node_ids: List[str],
     attachments: Optional[List[Dict[str, str]]] = None,
+    chat_history: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     advisor = _read_text_file("PLAN_ADVISOR.md").strip()
     if not advisor:
@@ -530,10 +623,20 @@ def _run_plan_advisor_only(
         attachments=attachments,
         closing_instruction=CLOSE_PLAN_ADVISOR,
     )
-    resp = model.invoke(
-        [SystemMessage(content=system_prompt), _build_human_message_with_attachments(user_prompt, attachments or [])],
-        response_format={"type": "json_object"},
-    )
+    hist = chat_history or []
+    lc: List[Any] = [SystemMessage(content=system_prompt)]
+    lc.extend(_history_to_langchain_messages(hist))
+    lc.append(_build_human_message_with_attachments(user_prompt, attachments or []))
+
+    try:
+        structured = model.with_structured_output(PlanAdvisorJsonModel)
+        out = structured.invoke(lc)
+        if isinstance(out, PlanAdvisorJsonModel) and out.assistantText.strip():
+            return out.assistantText.strip()
+    except Exception:
+        pass
+
+    resp = model.invoke(lc, response_format={"type": "json_object"})
     raw = str(getattr(resp, "content", "") or "")
     try:
         data = json.loads(raw)
@@ -556,6 +659,19 @@ def main() -> None:
         workflow_state = payload.get("workflowState") or {"nodes": [], "edges": []}
         selected_node_ids = payload.get("selectedNodeIds") or []
         attachments = _coerce_image_attachments(payload.get("attachments"))
+        try:
+            hist_max_turns = int(os.environ.get("FLOWY_CHAT_HISTORY_MAX_TURNS", "14"))
+        except ValueError:
+            hist_max_turns = 14
+        try:
+            hist_max_chars = int(os.environ.get("FLOWY_CHAT_HISTORY_MAX_CHARS", "4000"))
+        except ValueError:
+            hist_max_chars = 4000
+        chat_history = _cap_chat_history(
+            _normalize_chat_history(payload.get("chatHistory")),
+            max_turns=hist_max_turns,
+            max_chars=hist_max_chars,
+        )
         agent_mode = str(payload.get("agentMode") or "assist").strip().lower()
         if agent_mode not in {"plan", "assist", "auto"}:
             agent_mode = "assist"
@@ -580,11 +696,19 @@ def main() -> None:
         planner_model_name = os.environ.get("FLOWY_PLANNER_MODEL", "gpt-4.1-mini")
         router_model_name = os.environ.get("FLOWY_ROUTER_MODEL", planner_model_name)
 
-        model = ChatOpenAI(
-            api_key=openai_key,
-            model=planner_model_name,
-            temperature=0.2,
-        )
+        planner_max_tokens: Optional[int] = None
+        raw_max = os.environ.get("FLOWY_PLANNER_MAX_OUTPUT_TOKENS", "").strip()
+        if raw_max:
+            try:
+                planner_max_tokens = int(raw_max)
+            except ValueError:
+                planner_max_tokens = None
+
+        model_kwargs: Dict[str, Any] = {"api_key": openai_key, "model": planner_model_name, "temperature": 0.2}
+        if planner_max_tokens is not None:
+            model_kwargs["max_tokens"] = planner_max_tokens
+        model = ChatOpenAI(**model_kwargs)
+
         router_model = ChatOpenAI(
             api_key=openai_key,
             model=router_model_name,
@@ -592,7 +716,9 @@ def main() -> None:
         )
 
         if agent_mode == "plan":
-            text = _run_plan_advisor_only(model, message, workflow_state, selected_node_ids, attachments)
+            text = _run_plan_advisor_only(
+                model, message, workflow_state, selected_node_ids, attachments, chat_history=chat_history
+            )
             sys.stdout.write(
                 json.dumps(
                     {
@@ -617,7 +743,9 @@ def main() -> None:
         # Router should run for assist/auto too, so normal conversation remains possible
         # without forcing canvas edits on every message.
         if not skip_router:
-            route = _classify_user_intent(router_model, message, workflow_state, selected_node_ids)
+            route = _classify_user_intent(
+                router_model, message, workflow_state, selected_node_ids, chat_history
+            )
             if route and route.get("intent") == "conversation":
                 reply_text = route.get("reply")
                 if not isinstance(reply_text, str) or not reply_text.strip():
@@ -647,6 +775,11 @@ def main() -> None:
         last_errors: List[str] = []
         last_text_debug: str = ""
 
+        try:
+            structured_planner = model.with_structured_output(FlowyPlanJsonModel)
+        except Exception:
+            structured_planner = None  # type: ignore[assignment]
+
         for attempt in range(3):
             user_prompt = _build_user_prompt(
                 message,
@@ -661,20 +794,35 @@ def main() -> None:
                     + "\n".join(f"- {e}" for e in last_errors)
                     + "\n\nReturn ONLY corrected JSON."
                 )
-            # JSON mode guarantees parseable JSON output (we still validate shape below).
-            resp = model.invoke(
-                [SystemMessage(content=system_prompt), _build_human_message_with_attachments(user_prompt, attachments)],
-                response_format={"type": "json_object"},
-            )
-            last_text = str(getattr(resp, "content", "") or "")
-            last_text_debug = last_text[:2000] if last_text else ""
+            final_human = _build_human_message_with_attachments(user_prompt, attachments)
+            planner_lc: List[Any] = [SystemMessage(content=system_prompt)]
+            planner_lc.extend(_history_to_langchain_messages(chat_history))
+            planner_lc.append(final_human)
 
-            try:
-                candidate = json.loads(last_text)
-                if not isinstance(candidate, dict):
+            candidate: Dict[str, Any] = {}
+            last_text = ""
+            if structured_planner is not None:
+                try:
+                    plan_obj = structured_planner.invoke(planner_lc)
+                    if isinstance(plan_obj, FlowyPlanJsonModel):
+                        candidate = plan_obj.model_dump(exclude_none=True)
+                        last_text = json.dumps(candidate, ensure_ascii=False)
+                except Exception:
+                    candidate = {}
+
+            if not candidate:
+                resp = model.invoke(planner_lc, response_format={"type": "json_object"})
+                last_text = str(getattr(resp, "content", "") or "")
+                try:
+                    parsed_try = json.loads(last_text)
+                    if isinstance(parsed_try, dict):
+                        candidate = parsed_try
+                    else:
+                        candidate = _safe_extract_first_json_object(last_text)
+                except Exception:
                     candidate = _safe_extract_first_json_object(last_text)
-            except Exception:
-                candidate = _safe_extract_first_json_object(last_text)
+
+            last_text_debug = last_text[:2000] if last_text else ""
 
             if not candidate:
                 parsed = {}

@@ -10,6 +10,8 @@ type PlanRequest = {
   message: string;
   workflowState?: { nodes: any[]; edges: any[]; groups?: Record<string, unknown> };
   selectedNodeIds?: string[];
+  /** Prior turns only (current user message is in `message`). Capped client-side. */
+  chatHistory?: Array<{ role: "user" | "assistant"; text: string }>;
   attachments?: Array<{
     id: string;
     name?: string;

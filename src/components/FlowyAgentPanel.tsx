@@ -15,10 +15,12 @@ import {
   Paperclip,
   PanelRightOpen,
   Settings2,
+  Sparkles,
   SquarePen,
   SquarePlus,
 } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
+import { capFlowyChatHistory } from "@/lib/flowy/capFlowyChatHistory";
 import {
   createEmptyFlowySession,
   loadCustomInstructions,
@@ -177,9 +179,18 @@ export function FlowyAgentPanel({
   const seed = useMemo(() => createEmptyFlowySession(), []);
 
   const [sessions, setSessions] = useState<ChatSession[]>(() => [{ ...seed, title: "New Chat" }]);
+  const sessionsRef = useRef(sessions);
+  useEffect(() => {
+    sessionsRef.current = sessions;
+  }, [sessions]);
   const [activeSessionId, setActiveSessionId] = useState<string>(() => seed.id);
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
+
+  const autoContinueMaxSteps = useMemo(() => {
+    const n = Number(process.env.NEXT_PUBLIC_FLOWY_AUTO_CONTINUE_MAX_STEPS);
+    return Number.isFinite(n) && n > 0 ? Math.min(20, Math.floor(n)) : 3;
+  }, []);
 
   const updateSessionMessages = useCallback((sessionId: string, updater: (prev: ChatMsg[]) => ChatMsg[]) => {
     setSessions((prev) =>
@@ -375,6 +386,15 @@ export function FlowyAgentPanel({
       const sessionId = activeSessionIdRef.current;
       const agentModeAtStart = flowyAgentModeRef.current;
 
+      if (!opts?.suppressUserEcho) {
+        autoContinueCountRef.current = 0;
+      }
+
+      const priorMessages = sessionsRef.current.find((s) => s.id === sessionId)?.messages ?? [];
+      const chatHistoryPayload = capFlowyChatHistory(
+        priorMessages.map((m) => ({ role: m.role, text: m.text }))
+      );
+
       setErrorMessage(null);
       setIsPlanning(true);
       activePlanAbortRef.current?.abort();
@@ -397,6 +417,7 @@ export function FlowyAgentPanel({
               : trimmed,
             workflowState: stateForRequest,
             selectedNodeIds: contextNodeIds,
+            chatHistory: chatHistoryPayload,
             agentMode: agentModeAtStart,
             attachments: imageAttachments,
           }),
@@ -470,6 +491,20 @@ export function FlowyAgentPanel({
     await requestPlan(trimmed);
     setImageAttachments([]);
   }, [input, requestPlan]);
+
+  const handleSuggestNextStep = useCallback(() => {
+    void requestPlan(
+      "Next step: use the execution digest and graph — wire missing edges, run pending generators, fix errors, or add a small refinement. Minimal operations; empty operations if nothing is needed.",
+      { suppressUserEcho: false }
+    );
+  }, [requestPlan]);
+
+  const handleQuickFollowUp = useCallback(
+    (instruction: string) => {
+      void requestPlan(instruction, { suppressUserEcho: false });
+    },
+    [requestPlan]
+  );
 
   const handleImageFilesSelected = useCallback(
     async (files: FileList | null) => {
@@ -773,7 +808,7 @@ export function FlowyAgentPanel({
       if (!autoContinue) return;
       const goal = lastGoalRef.current;
       if (!goal) return;
-      if (autoContinueCountRef.current >= 3) return;
+      if (autoContinueCountRef.current >= autoContinueMaxSteps) return;
       autoContinueCountRef.current += 1;
 
       await requestPlan(
@@ -783,7 +818,16 @@ export function FlowyAgentPanel({
         { suppressUserEcho: true }
       );
     })();
-  }, [autoContinue, executionIndex, flowyAgentMode, onRunNodeIds, pendingExecuteNodeIds, pendingOperations, requestPlan]);
+  }, [
+    autoContinue,
+    autoContinueMaxSteps,
+    executionIndex,
+    flowyAgentMode,
+    onRunNodeIds,
+    pendingExecuteNodeIds,
+    pendingOperations,
+    requestPlan,
+  ]);
 
   // Auto-apply mode: run through all pending operations sequentially.
   useEffect(() => {
@@ -1257,6 +1301,58 @@ export function FlowyAgentPanel({
                   <span>Flowy is thinking...</span>
                 </div>
               )}
+              {flowyAgentMode === "assist" &&
+                stateForRequest &&
+                stateForRequest.nodes.length > 0 &&
+                !isPlanning && (
+                  <div className="flex justify-end px-0.5">
+                    <button
+                      type="button"
+                      onClick={handleSuggestNextStep}
+                      disabled={isPlanning || isExecutingStep || isRunning}
+                      className="inline-flex items-center gap-1 rounded-lg border border-white/10 bg-white/[0.06] px-2 py-1 text-[11px] text-neutral-200 transition-colors hover:bg-white/10 disabled:opacity-40"
+                    >
+                      <Sparkles className="size-3" strokeWidth={2} aria-hidden />
+                      Suggest next step
+                    </button>
+                  </div>
+                )}
+              {flowyAgentMode !== "plan" &&
+                workflowState &&
+                workflowState.nodes.length > 0 &&
+                !isPlanning && (
+                  <div className="flex flex-wrap items-center gap-1.5 px-0.5">
+                    <span className="w-full text-[10px] font-medium uppercase tracking-wide text-neutral-500">
+                      Quick follow-up
+                    </span>
+                    {(
+                      [
+                        {
+                          label: "Vary",
+                          text: "Add a variation path or second output option from the current graph (branch, duplicate, or compare).",
+                        },
+                        {
+                          label: "Animate",
+                          text: "Extend the workflow toward video output from the current setup (add video generation and wire from image/text as needed).",
+                        },
+                        {
+                          label: "Fix errors",
+                          text: "Find nodes with error or failed run status in the execution digest and fix wiring, prompts, or settings.",
+                        },
+                      ] as const
+                    ).map((c) => (
+                      <button
+                        key={c.label}
+                        type="button"
+                        onClick={() => handleQuickFollowUp(c.text)}
+                        disabled={isExecutingStep || isRunning}
+                        className="rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-neutral-200 transition-colors hover:bg-white/10 disabled:opacity-40"
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               {contextNodeChips.length > 0 && (
                 <div
                   role="list"

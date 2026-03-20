@@ -94,6 +94,63 @@ def _neighbors(edges: List[Dict[str, Any]]) -> Dict[str, Set[str]]:
     return adj
 
 
+def compute_focus_node_ids(
+    workflow_state: Dict[str, Any],
+    selected_node_ids: Optional[List[str]] = None,
+    neighbor_hops: int = 2,
+    focus_max_nodes: int = 72,
+) -> Set[str]:
+    """
+    Same focus rule as build_canvas_context_for_llm: seeds + BFS neighbors, capped.
+    Used for execution digest and other focused views.
+    """
+    nodes_raw = workflow_state.get("nodes") or []
+    edges_raw = workflow_state.get("edges") or []
+    if not isinstance(nodes_raw, list):
+        nodes_raw = []
+    if not isinstance(edges_raw, list):
+        edges_raw = []
+
+    nodes_by_id: Dict[str, Dict[str, Any]] = {}
+    for n in nodes_raw:
+        if not isinstance(n, dict):
+            continue
+        nid = n.get("id")
+        if not nid:
+            continue
+        nodes_by_id[str(nid)] = n
+
+    all_ids = set(nodes_by_id.keys())
+    seed = set(str(x) for x in (selected_node_ids or []) if x)
+    adj = _neighbors([e for e in edges_raw if isinstance(e, dict)])
+
+    focus_ids = _expand_focus(seed, adj, neighbor_hops, all_ids)
+
+    if len(focus_ids) > focus_max_nodes:
+        ordered: List[str] = []
+        seen: Set[str] = set()
+        for sid in seed:
+            if sid in focus_ids and sid not in seen:
+                ordered.append(sid)
+                seen.add(sid)
+        q = list(ordered)
+        while q and len(ordered) < focus_max_nodes:
+            cur = q.pop(0)
+            for nb in sorted(adj.get(cur, ())):
+                if nb in focus_ids and nb not in seen:
+                    seen.add(nb)
+                    ordered.append(nb)
+                    q.append(nb)
+        for nid in sorted(focus_ids):
+            if len(ordered) >= focus_max_nodes:
+                break
+            if nid not in seen:
+                ordered.append(nid)
+        focus_ids = set(ordered[:focus_max_nodes])
+
+    return focus_ids
+
+
 def _expand_focus(
     seed: Set[str], adj: Dict[str, Set[str]], hops: int, all_ids: Set[str]
 ) -> Set[str]:
@@ -154,32 +211,13 @@ def build_canvas_context_for_llm(
 
     all_ids = set(nodes_by_id.keys())
     seed = set(str(x) for x in (selected_node_ids or []) if x)
-    adj = _neighbors([e for e in edges_raw if isinstance(e, dict)])
 
-    focus_ids = _expand_focus(seed, adj, neighbor_hops, all_ids)
-
-    # Cap focus size: keep seeds first, then BFS order
-    if len(focus_ids) > focus_max_nodes:
-        ordered: List[str] = []
-        seen: Set[str] = set()
-        for sid in seed:
-            if sid in focus_ids and sid not in seen:
-                ordered.append(sid)
-                seen.add(sid)
-        q = list(ordered)
-        while q and len(ordered) < focus_max_nodes:
-            cur = q.pop(0)
-            for nb in sorted(adj.get(cur, ())):
-                if nb in focus_ids and nb not in seen:
-                    seen.add(nb)
-                    ordered.append(nb)
-                    q.append(nb)
-        for nid in sorted(focus_ids):
-            if len(ordered) >= focus_max_nodes:
-                break
-            if nid not in seen:
-                ordered.append(nid)
-        focus_ids = set(ordered[:focus_max_nodes])
+    focus_ids = compute_focus_node_ids(
+        workflow_state,
+        selected_node_ids=selected_node_ids,
+        neighbor_hops=neighbor_hops,
+        focus_max_nodes=focus_max_nodes,
+    )
 
     detailed: List[Dict[str, Any]] = []
     for nid in sorted(focus_ids):
@@ -294,6 +332,112 @@ def build_canvas_context_for_llm(
 
     ctx["summary"]["approxJsonChars"] = measure()
     return ctx
+
+
+def _nonempty_media_value(val: Any) -> bool:
+    if val is None:
+        return False
+    if isinstance(val, str) and val.strip():
+        return True
+    if isinstance(val, (list, dict)) and len(val) > 0:
+        return True
+    return False
+
+
+def build_execution_digest_for_llm(
+    workflow_state: Dict[str, Any],
+    selected_node_ids: Optional[List[str]] = None,
+    neighbor_hops: int = 2,
+    focus_max_nodes: int = 72,
+) -> List[Dict[str, Any]]:
+    """
+    Non-binary execution summary for focused nodes: status, errors, output presence.
+    Helps the planner/auto-continue inspect runs without embedding data URLs.
+    """
+    nodes_raw = workflow_state.get("nodes") or []
+    if not isinstance(nodes_raw, list):
+        return []
+
+    nodes_by_id: Dict[str, Dict[str, Any]] = {}
+    for n in nodes_raw:
+        if not isinstance(n, dict):
+            continue
+        nid = n.get("id")
+        if not nid:
+            continue
+        nodes_by_id[str(nid)] = n
+
+    focus_ids = compute_focus_node_ids(
+        workflow_state,
+        selected_node_ids=selected_node_ids,
+        neighbor_hops=neighbor_hops,
+        focus_max_nodes=focus_max_nodes,
+    )
+
+    digest: List[Dict[str, Any]] = []
+    for nid in sorted(focus_ids):
+        n = nodes_by_id.get(nid)
+        if not n:
+            continue
+        ntype = str(n.get("type") or "unknown")
+        data = n.get("data")
+        data_d: Dict[str, Any] = data if isinstance(data, dict) else {}
+
+        status = data_d.get("status")
+        if status is not None and not isinstance(status, (str, bool, int, float)):
+            status = str(status)
+
+        err_raw = data_d.get("error")
+        err_str: Optional[str] = None
+        if isinstance(err_raw, str) and err_raw.strip():
+            err_str = _truncate_str(err_raw, 240)
+
+        title = data_d.get("customTitle")
+        title_str = str(title).strip() if isinstance(title, str) and title.strip() else None
+
+        prompt = data_d.get("prompt")
+        prompt_preview: Optional[str] = None
+        if isinstance(prompt, str) and prompt.strip():
+            prompt_preview = _truncate_str(prompt, 140)
+
+        has_image = False
+        has_video = False
+        has_audio = False
+        has_3d = False
+        for k, v in data_d.items():
+            if not _nonempty_media_value(v):
+                continue
+            kl = str(k).lower()
+            if k == "glbUrl" or "glb" in kl:
+                has_3d = True
+            elif k in ("outputVideo", "videoFile") or ("output" in kl and "video" in kl):
+                has_video = True
+            elif k in ("outputAudio", "audioFile") or ("output" in kl and "audio" in kl):
+                has_audio = True
+            elif k in ("outputImage", "capturedImage", "sourceImage", "outputImageRef") or (
+                k == "image" and isinstance(v, str) and (v.startswith("data:") or v.startswith("http"))
+            ):
+                has_image = True
+
+        entry: Dict[str, Any] = {
+            "id": nid,
+            "type": ntype,
+            "hasOutputImage": bool(has_image),
+            "hasOutputVideo": bool(has_video),
+            "hasOutputAudio": bool(has_audio),
+            "hasOutput3d": bool(has_3d),
+        }
+        if status is not None:
+            entry["status"] = status
+        if err_str:
+            entry["error"] = err_str
+        if title_str:
+            entry["customTitle"] = title_str
+        if prompt_preview:
+            entry["promptPreview"] = prompt_preview
+        digest.append(entry)
+
+    return digest
 
 
 def load_planner_schema(script_dir: str) -> Dict[str, Any]:
