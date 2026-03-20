@@ -26,6 +26,11 @@ Each operation MUST be one of:
 3. `{"type":"updateNode","nodeId": string, "data": object}`
 4. `{"type":"addEdge","source": string, "target": string, "sourceHandle": string, "targetHandle": string, "id": string?}`
 5. `{"type":"removeEdge","edgeId": string}`
+6. `{"type":"moveNode","nodeId": string, "position": {"x": number, "y": number}}`
+7. `{"type":"createGroup","nodeIds": string[], "groupId": string?, "name": string?, "color": "neutral"|"blue"|"green"|"purple"|"orange"|"red"?}`
+8. `{"type":"deleteGroup","groupId": string}`
+9. `{"type":"updateGroup","groupId": string, "updates": object}`
+10. `{"type":"setNodeGroup","nodeId": string, "groupId": string?}`
 
 ## Canvas rules
 - Never reference `nodeId`s that do not exist **unless** you also add them in the same `operations` list.

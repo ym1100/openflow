@@ -11,6 +11,7 @@ export async function POST(request: Request) {
       workflowState?: {
         nodes: any[];
         edges: any[];
+        groups?: Record<string, any>;
       };
       operations?: any[];
     };
@@ -35,6 +36,7 @@ export async function POST(request: Request) {
       workflowState = {
         nodes: loadedWorkflow?.nodes ?? [],
         edges: loadedWorkflow?.edges ?? [],
+        groups: loadedWorkflow?.groups ?? {},
       };
     }
 
@@ -52,11 +54,13 @@ export async function POST(request: Request) {
     const result = applyEditOperations(operations as any, {
       nodes: workflowState.nodes,
       edges: workflowState.edges,
+      groups: workflowState.groups ?? {},
     });
 
     if (filePath && loadedWorkflow) {
       loadedWorkflow.nodes = result.nodes;
       loadedWorkflow.edges = result.edges;
+      loadedWorkflow.groups = result.groups ?? {};
       await saveWorkflowToFileProject(filePath, loadedWorkflow);
     }
 

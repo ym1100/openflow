@@ -2374,11 +2374,13 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
     const result = executeEditOps(operations, {
       nodes: state.nodes,
       edges: state.edges,
+      groups: state.groups,
     });
 
     set({
       nodes: result.nodes,
       edges: result.edges,
+      groups: result.groups,
       hasUnsavedChanges: true,
     });
 

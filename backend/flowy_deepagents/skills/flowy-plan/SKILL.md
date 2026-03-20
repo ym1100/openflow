@@ -21,6 +21,8 @@ Use `addNode`/`addEdge` for new graphs.
 Use `updateNode` to change an existing prompt node (e.g., setting its `prompt` text).
 Use `removeNode` to clear/reset the canvas.
 Use `executeNodeIds` to request node execution after planning edits.
+Use `moveNode` to arrange layout positions.
+Use `createGroup`/`setNodeGroup`/`updateGroup`/`deleteGroup` for grouping workflows.
 
 ## Toolbar-style actions
 Map UI toolbar intents to planner outputs:

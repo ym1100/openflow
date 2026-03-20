@@ -142,6 +142,47 @@ def _validate_edit_operations(operations: List[Dict[str, Any]], workflow_state: 
             if not edge_id or edge_id not in initial_edge_ids:
                 errors.append(f"operations[{idx}].edgeId not found: {edge_id}")
 
+        if op_type == "moveNode":
+            node_id = op.get("nodeId")
+            pos = op.get("position")
+            if not node_id or node_id not in valid_node_ids:
+                errors.append(f"operations[{idx}].nodeId not found: {node_id}")
+            if not isinstance(pos, dict) or not isinstance(pos.get("x"), (int, float)) or not isinstance(pos.get("y"), (int, float)):
+                errors.append(f"operations[{idx}].position must be an object with numeric x/y")
+
+        if op_type == "createGroup":
+            node_ids = op.get("nodeIds")
+            if not isinstance(node_ids, list) or len(node_ids) == 0:
+                errors.append(f"operations[{idx}].nodeIds must be a non-empty list")
+            else:
+                for nid in node_ids:
+                    if nid not in valid_node_ids:
+                        errors.append(f"operations[{idx}] nodeIds contains unknown nodeId: {nid}")
+            color = op.get("color")
+            if color is not None and color not in {"neutral", "blue", "green", "purple", "orange", "red"}:
+                errors.append(f"operations[{idx}].color invalid: {color}")
+
+        if op_type == "deleteGroup":
+            group_id = op.get("groupId")
+            if not isinstance(group_id, str) or not group_id.strip():
+                errors.append(f"operations[{idx}].groupId is required")
+
+        if op_type == "updateGroup":
+            group_id = op.get("groupId")
+            updates = op.get("updates")
+            if not isinstance(group_id, str) or not group_id.strip():
+                errors.append(f"operations[{idx}].groupId is required")
+            if not isinstance(updates, dict):
+                errors.append(f"operations[{idx}].updates must be an object")
+
+        if op_type == "setNodeGroup":
+            node_id = op.get("nodeId")
+            group_id = op.get("groupId")
+            if not node_id or node_id not in valid_node_ids:
+                errors.append(f"operations[{idx}].nodeId not found: {node_id}")
+            if group_id is not None and not isinstance(group_id, str):
+                errors.append(f"operations[{idx}].groupId must be string or null")
+
     return {"ok": not errors, "errors": errors}
 
 

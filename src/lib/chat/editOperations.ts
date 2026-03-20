@@ -1,4 +1,4 @@
-import { NodeType, WorkflowNode, WorkflowNodeData } from "@/types";
+import { GroupColor, NodeGroup, NodeType, WorkflowNode, WorkflowNodeData } from "@/types";
 import { WorkflowEdge } from "@/types/workflow";
 import { createDefaultNodeData } from "@/store/utils/nodeDefaults";
 import { defaultNodeDimensions } from "@/store/utils/nodeDefaults";
@@ -28,7 +28,24 @@ export type EditOperation =
       sourceHandle?: string;
       targetHandle?: string;
     }
-  | { type: "removeEdge"; edgeId: string };
+  | { type: "removeEdge"; edgeId: string }
+  | { type: "moveNode"; nodeId: string; position: { x: number; y: number } }
+  | {
+      type: "createGroup";
+      nodeIds: string[];
+      groupId?: string;
+      name?: string;
+      color?: GroupColor;
+    }
+  | { type: "deleteGroup"; groupId: string }
+  | {
+      type: "updateGroup";
+      groupId: string;
+      updates: Partial<
+        Pick<NodeGroup, "name" | "color" | "locked" | "position" | "size">
+      >;
+    }
+  | { type: "setNodeGroup"; nodeId: string; groupId?: string };
 
 /**
  * Result of applying edit operations to the workflow.
@@ -36,6 +53,7 @@ export type EditOperation =
 export interface ApplyEditResult {
   nodes: WorkflowNode[];
   edges: WorkflowEdge[];
+  groups: Record<string, NodeGroup>;
   applied: number;
   skipped: string[];
 }
@@ -51,12 +69,18 @@ export interface ApplyEditResult {
  */
 export function applyEditOperations(
   operations: EditOperation[],
-  storeState: { nodes: WorkflowNode[]; edges: WorkflowEdge[] }
+  storeState: {
+    nodes: WorkflowNode[];
+    edges: WorkflowEdge[];
+    groups?: Record<string, NodeGroup>;
+  }
 ): ApplyEditResult {
   let nodes = [...storeState.nodes];
   let edges = [...storeState.edges];
+  let groups: Record<string, NodeGroup> = { ...(storeState.groups ?? {}) };
   const skipped: string[] = [];
   let applied = 0;
+  let localGroupCounter = Object.keys(groups).length;
 
   for (const [index, operation] of operations.entries()) {
     switch (operation.type) {
@@ -191,12 +215,121 @@ export function applyEditOperations(
         applied++;
         break;
       }
+      case "moveNode": {
+        const nodeExists = nodes.find((n) => n.id === operation.nodeId);
+        if (!nodeExists) {
+          skipped.push(`moveNode: node "${operation.nodeId}" not found`);
+          break;
+        }
+        nodes = nodes.map((n) =>
+          n.id === operation.nodeId ? { ...n, position: operation.position } : n
+        );
+        applied++;
+        break;
+      }
+      case "createGroup": {
+        const nodeIds = Array.from(new Set(operation.nodeIds ?? []));
+        const nodesToGroup = nodes.filter((n) => nodeIds.includes(n.id));
+        if (nodesToGroup.length === 0) {
+          skipped.push("createGroup: no valid nodeIds provided");
+          break;
+        }
+
+        const requestedId =
+          operation.groupId && operation.groupId.trim().length > 0
+            ? operation.groupId.trim()
+            : `group-ai-${++localGroupCounter}`;
+        const groupId = groups[requestedId]
+          ? `${requestedId}-${Date.now()}`
+          : requestedId;
+
+        let minX = Infinity;
+        let minY = Infinity;
+        let maxX = -Infinity;
+        let maxY = -Infinity;
+        for (const node of nodesToGroup) {
+          const defaults = defaultNodeDimensions[node.type as NodeType] ?? {
+            width: 300,
+            height: 280,
+          };
+          const width =
+            (node.style?.width as number | undefined) ??
+            (node.measured?.width as number | undefined) ??
+            defaults.width;
+          const height =
+            (node.style?.height as number | undefined) ??
+            (node.measured?.height as number | undefined) ??
+            defaults.height;
+          minX = Math.min(minX, node.position.x);
+          minY = Math.min(minY, node.position.y);
+          maxX = Math.max(maxX, node.position.x + width);
+          maxY = Math.max(maxY, node.position.y + height);
+        }
+        const padding = 20;
+        const newGroup: NodeGroup = {
+          id: groupId,
+          name: operation.name?.trim() || `Group ${Object.keys(groups).length + 1}`,
+          color: operation.color ?? "neutral",
+          position: { x: minX - padding, y: minY - padding },
+          size: { width: maxX - minX + padding * 2, height: maxY - minY + padding * 2 },
+          locked: false,
+        };
+        groups = { ...groups, [groupId]: newGroup };
+        nodes = nodes.map((n) =>
+          nodeIds.includes(n.id) ? { ...n, groupId } : n
+        ) as WorkflowNode[];
+        applied++;
+        break;
+      }
+      case "deleteGroup": {
+        if (!groups[operation.groupId]) {
+          skipped.push(`deleteGroup: group "${operation.groupId}" not found`);
+          break;
+        }
+        const { [operation.groupId]: _, ...rest } = groups;
+        groups = rest;
+        nodes = nodes.map((n) =>
+          n.groupId === operation.groupId ? { ...n, groupId: undefined } : n
+        ) as WorkflowNode[];
+        applied++;
+        break;
+      }
+      case "updateGroup": {
+        const existing = groups[operation.groupId];
+        if (!existing) {
+          skipped.push(`updateGroup: group "${operation.groupId}" not found`);
+          break;
+        }
+        groups = {
+          ...groups,
+          [operation.groupId]: { ...existing, ...operation.updates },
+        };
+        applied++;
+        break;
+      }
+      case "setNodeGroup": {
+        const nodeExists = nodes.find((n) => n.id === operation.nodeId);
+        if (!nodeExists) {
+          skipped.push(`setNodeGroup: node "${operation.nodeId}" not found`);
+          break;
+        }
+        if (operation.groupId && !groups[operation.groupId]) {
+          skipped.push(`setNodeGroup: group "${operation.groupId}" not found`);
+          break;
+        }
+        nodes = nodes.map((n) =>
+          n.id === operation.nodeId ? { ...n, groupId: operation.groupId } : n
+        ) as WorkflowNode[];
+        applied++;
+        break;
+      }
     }
   }
 
   return {
     nodes,
     edges,
+    groups,
     applied,
     skipped,
   };
@@ -221,6 +354,16 @@ export function narrateOperations(operations: EditOperation[]): string {
         return `Connected ${op.source} to ${op.target}`;
       case "removeEdge":
         return `Removed connection ${op.edgeId}`;
+      case "moveNode":
+        return `Moved node ${op.nodeId}`;
+      case "createGroup":
+        return `Created group for ${op.nodeIds.length} nodes`;
+      case "deleteGroup":
+        return `Deleted group ${op.groupId}`;
+      case "updateGroup":
+        return `Updated group ${op.groupId}`;
+      case "setNodeGroup":
+        return `Updated group membership for ${op.nodeId}`;
     }
   });
 

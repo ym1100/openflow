@@ -30,6 +30,11 @@
     "removeNode",
     "updateNode",
     "addEdge",
-    "removeEdge"
+    "removeEdge",
+    "moveNode",
+    "createGroup",
+    "deleteGroup",
+    "updateGroup",
+    "setNodeGroup"
   ]
 }
