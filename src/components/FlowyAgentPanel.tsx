@@ -38,6 +38,7 @@ import {
   saveFlowyPanelSessions,
   saveStyleMemory,
   styleMemoryToPromptContext,
+  updateStyleMemoryEntry,
   type FlowyAgentMode,
   type StoredChatSession,
   type StyleMemory,
@@ -202,6 +203,64 @@ function inferVisionAttachmentsFromWorkflow(
   }
 
   return out;
+}
+
+function extractStyleSignals(text: string): {
+  models: string[];
+  styles: string[];
+  aspectRatios: string[];
+  patterns: string[];
+} {
+  const source = text.toLowerCase();
+  const uniq = (arr: string[]) => Array.from(new Set(arr.map((x) => x.trim()).filter(Boolean)));
+
+  const models: string[] = [];
+  const modelMatchers = ["nano banana", "imagen 4", "imagen", "seedream", "flux", "midjourney", "sdxl"];
+  for (const m of modelMatchers) {
+    if (source.includes(m)) models.push(m);
+  }
+
+  const styles: string[] = [];
+  const styleMatchers = [
+    "cinematic",
+    "photoreal",
+    "photorealistic",
+    "grunge",
+    "zine",
+    "punk",
+    "vintage",
+    "minimalist",
+    "anime",
+    "3d render",
+    "illustration",
+  ];
+  for (const s of styleMatchers) {
+    if (source.includes(s)) styles.push(s);
+  }
+
+  const aspectRatios: string[] = [];
+  const ratioRegex = /\b([1-9]\d?)\s*[:x\/]\s*([1-9]\d?)\b/g;
+  for (const match of source.matchAll(ratioRegex)) {
+    aspectRatios.push(`${match[1]}:${match[2]}`);
+  }
+  if (source.includes("--ar")) {
+    const arMatch = source.match(/--ar\s*([1-9]\d?)\s*[:x\/]\s*([1-9]\d?)/);
+    if (arMatch) aspectRatios.push(`${arMatch[1]}:${arMatch[2]}`);
+  }
+
+  const patterns: string[] = [];
+  if (source.includes("instagram")) patterns.push("instagram-post");
+  if (source.includes("poster")) patterns.push("poster-design");
+  if (source.includes("collage")) patterns.push("collage-workflow");
+  if (source.includes("video")) patterns.push("video-pipeline");
+  if (source.includes("brand")) patterns.push("brand-creative");
+
+  return {
+    models: uniq(models),
+    styles: uniq(styles),
+    aspectRatios: uniq(aspectRatios),
+    patterns: uniq(patterns),
+  };
 }
 
 /** Markdown in Flowy chat (user + assistant): bold, lists, code, links — no raw `**`. */
@@ -875,6 +934,24 @@ export function FlowyAgentPanel({
     const trimmed = input.trim();
     if (!trimmed) return;
     lastGoalRef.current = trimmed;
+    const signals = extractStyleSignals(trimmed);
+    setStyleMemory((prev) => {
+      if (!prev) return prev;
+      let next = prev;
+      for (const m of signals.models) {
+        next = updateStyleMemoryEntry(next, "preferredModels", `model:${m}`, m);
+      }
+      for (const s of signals.styles) {
+        next = updateStyleMemoryEntry(next, "preferredStyles", `style:${s}`, s);
+      }
+      for (const r of signals.aspectRatios) {
+        next = updateStyleMemoryEntry(next, "preferredAspectRatios", `ratio:${r}`, r);
+      }
+      for (const p of signals.patterns) {
+        next = updateStyleMemoryEntry(next, "commonPatterns", `pattern:${p}`, p);
+      }
+      return next;
+    });
     setInput("");
     await requestPlan(trimmed);
     setImageAttachments([]);
@@ -1212,6 +1289,60 @@ export function FlowyAgentPanel({
   }, [createSession]);
 
   const modeSliderIndex = flowyAgentMode === "assist" ? 0 : flowyAgentMode === "auto" ? 1 : 2;
+  const styleMemorySummary = useMemo(() => {
+    if (!styleMemory) {
+      return {
+        models: 0,
+        styles: 0,
+        ratios: 0,
+        patterns: 0,
+        topModels: [] as string[],
+        topStyles: [] as string[],
+        topRatios: [] as string[],
+        topPatterns: [] as string[],
+      };
+    }
+    const top = (arr: Array<{ value: string }>, n: number) =>
+      arr
+        .map((x) => x.value.trim())
+        .filter(Boolean)
+        .slice(0, n);
+    return {
+      models: styleMemory.preferredModels.length,
+      styles: styleMemory.preferredStyles.length,
+      ratios: styleMemory.preferredAspectRatios.length,
+      patterns: styleMemory.commonPatterns.length,
+      topModels: top(styleMemory.preferredModels, 3),
+      topStyles: top(styleMemory.preferredStyles, 3),
+      topRatios: top(styleMemory.preferredAspectRatios, 3),
+      topPatterns: top(styleMemory.commonPatterns, 3),
+    };
+  }, [styleMemory]);
+  const memoryInspectorText = useMemo(() => {
+    return [
+      `projectScope: ${sessionScopeId}`,
+      `workflowId: ${workflowId ?? "(none)"}`,
+      `agentMode: ${flowyAgentMode}`,
+      `sessions: ${sessions.length}`,
+      `activeSessionId: ${activeSessionId}`,
+      `customInstructionsChars: ${customInstructions.trim().length}`,
+      `styleMemory: models=${styleMemorySummary.models}, styles=${styleMemorySummary.styles}, ratios=${styleMemorySummary.ratios}, patterns=${styleMemorySummary.patterns}`,
+      styleMemorySummary.topModels.length ? `topModels: ${styleMemorySummary.topModels.join(" | ")}` : "",
+      styleMemorySummary.topStyles.length ? `topStyles: ${styleMemorySummary.topStyles.join(" | ")}` : "",
+      styleMemorySummary.topRatios.length ? `topAspectRatios: ${styleMemorySummary.topRatios.join(" | ")}` : "",
+      styleMemorySummary.topPatterns.length ? `topPatterns: ${styleMemorySummary.topPatterns.join(" | ")}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+  }, [
+    sessionScopeId,
+    workflowId,
+    flowyAgentMode,
+    sessions.length,
+    activeSessionId,
+    customInstructions,
+    styleMemorySummary,
+  ]);
   const chatInputPlaceholder =
     flowyAgentMode === "plan"
       ? "Brainstorm workflows, prompts, and tradeoffs. Use @ to mention nodes."
@@ -1964,6 +2095,53 @@ export function FlowyAgentPanel({
                 placeholder="Example: Prefer concise answers first; only edit canvas when I explicitly ask."
                 className="w-full min-h-[140px] bg-neutral-900/40 border border-neutral-700 rounded-xl px-3 py-2 text-sm text-neutral-200 placeholder-neutral-500 focus:outline-none focus:border-blue-500 resize-y"
               />
+              <div className="mt-3 rounded-xl border border-white/10 bg-white/[0.03] p-3">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div>
+                    <div className="text-xs font-medium text-neutral-200">Project agent memory</div>
+                    <div className="text-[11px] text-neutral-500">
+                      Scope: <span className="font-mono text-neutral-400">{sessionScopeId}</span>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(memoryInspectorText);
+                      } catch {
+                        // ignore clipboard errors
+                      }
+                    }}
+                    className="inline-flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.04] px-2 py-1 text-[11px] text-neutral-300 hover:bg-white/[0.08]"
+                    title="Copy memory snapshot"
+                  >
+                    <Copy className="size-3" />
+                    Copy
+                  </button>
+                </div>
+                <div className="mb-2 grid grid-cols-2 gap-2 text-[11px] text-neutral-400">
+                  <div>
+                    Sessions: <span className="text-neutral-300">{sessions.length}</span>
+                  </div>
+                  <div>
+                    Active: <span className="font-mono text-neutral-300">{activeSessionId}</span>
+                  </div>
+                  <div>
+                    Style models: <span className="text-neutral-300">{styleMemorySummary.models}</span>
+                  </div>
+                  <div>
+                    Styles: <span className="text-neutral-300">{styleMemorySummary.styles}</span>
+                  </div>
+                </div>
+                <details className="group">
+                  <summary className="cursor-pointer text-[11px] text-neutral-400 hover:text-neutral-200">
+                    Show full memory snapshot
+                  </summary>
+                  <pre className="mt-2 max-h-44 overflow-auto rounded-lg border border-white/10 bg-black/30 p-2 text-[10px] leading-relaxed text-neutral-300 whitespace-pre-wrap">
+{memoryInspectorText}
+                  </pre>
+                </details>
+              </div>
               <div className="mt-3 flex items-center justify-between">
                 <button
                   type="button"
