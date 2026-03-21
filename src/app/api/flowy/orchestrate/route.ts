@@ -26,6 +26,8 @@ type PlanRequest = {
   requireCautionApproval?: boolean;
   expectedWorkflowHash?: string;
   idempotencyKey?: string;
+  /** Optional Openflow DOM snapshot text for planner context (same as /api/flowy/plan). */
+  openflowUiSnapshot?: string;
 };
 
 const FLOWY_PLANNER_TIMEOUT_MS = Number(process.env.FLOWY_PLANNER_TIMEOUT_MS || 120000);

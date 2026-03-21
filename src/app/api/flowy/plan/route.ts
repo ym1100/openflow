@@ -34,6 +34,8 @@ type PlanRequest = {
   runQualityCheck?: boolean;
   enforceCanvasControl?: boolean;
   requireCautionApproval?: boolean;
+  /** Client-built Openflow UI snapshot text for planner context (refs for uiCommands). */
+  openflowUiSnapshot?: string;
 };
 
 const FLOWY_VENV_HINT =

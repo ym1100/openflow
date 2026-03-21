@@ -20,6 +20,7 @@ type PlanRequest = {
   runQualityCheck?: boolean;
   enforceCanvasControl?: boolean;
   requireCautionApproval?: boolean;
+  openflowUiSnapshot?: string;
 };
 
 const FLOWY_VENV_HINT =

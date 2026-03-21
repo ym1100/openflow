@@ -4,6 +4,14 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { createPortal } from "react-dom";
 import type { EditOperation } from "@/lib/chat/editOperations";
 import { executeOperationWithMouse, type OrchestratorDeps } from "@/lib/flowy/agentCanvasOrchestrator";
+import {
+  buildOpenflowAgentSnapshot,
+  describeOpenflowUiCommand,
+  executeOpenflowAgentCommands,
+  parseOpenflowUiCommandsFromJson,
+  type OpenflowAgentCommand,
+  type OpenflowAgentExecutorDeps,
+} from "@/lib/flowy/openflowAgentCommands";
 import { useReactFlow } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import {
@@ -175,10 +183,13 @@ type FlowyPlanResponse = {
   };
   decomposition?: DecompositionInfo;
   qualityCheck?: QualityCheck;
+  /** Raw planner output; parsed client-side with parseOpenflowUiCommandsFromJson */
+  uiCommands?: unknown[];
 };
 
 type AppliedPlanRecord = {
   operations: string[];
+  uiCommands?: string[];
   executedNodeIds?: string[];
   timestamp: number;
 };
@@ -657,6 +668,12 @@ export function FlowyAgentPanel({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const [pendingOperations, setPendingOperations] = useState<EditOperation[] | null>(null);
+  const [pendingUiCommands, setPendingUiCommands] = useState<OpenflowAgentCommand[] | null>(null);
+  const pendingUiCommandsApplyRef = useRef<OpenflowAgentCommand[]>([]);
+  const resetPendingUiCommands = useCallback(() => {
+    pendingUiCommandsApplyRef.current = [];
+    setPendingUiCommands(null);
+  }, []);
   const [pendingExplanation, setPendingExplanation] = useState<string | null>(null);
   const [pendingExecuteNodeIds, setPendingExecuteNodeIds] = useState<string[] | null>(null);
   const [pendingRunApprovalRequired, setPendingRunApprovalRequired] = useState<boolean>(true);
@@ -984,6 +1001,13 @@ export function FlowyAgentPanel({
           (a, idx, arr) => arr.findIndex((x) => x.dataUrl === a.dataUrl) === idx
         );
 
+        let openflowUiSnapshot: string | undefined;
+        try {
+          openflowUiSnapshot = buildOpenflowAgentSnapshot().text;
+        } catch {
+          openflowUiSnapshot = undefined;
+        }
+
         const body: Record<string, unknown> = {
           message: fullMessage,
           workflowState: stateForRequest,
@@ -995,6 +1019,7 @@ export function FlowyAgentPanel({
           canvasStateMemory,
           enforceCanvasControl,
           requireCautionApproval,
+          openflowUiSnapshot,
         };
         if (opts?.stageIndex !== undefined) body.stageIndex = opts.stageIndex;
         if (opts?.decompositionStages) body.decompositionStages = opts.decompositionStages;
@@ -1078,9 +1103,10 @@ export function FlowyAgentPanel({
             throw new Error(err?.error || `Plan failed (${res.status})`);
           }
 
-          data = (await res.json()) as any;
-          if (data.progressEvents?.length) {
-            const last = data.progressEvents[data.progressEvents.length - 1];
+          const payload = (await res.json()) as any;
+          data = payload;
+          if (payload?.progressEvents?.length) {
+            const last = payload.progressEvents[payload.progressEvents.length - 1];
             setPlannerProgress(last.detail || last.progress);
             setPlannerStageEvent(last as PlannerStageEvent);
           }
@@ -1142,6 +1168,7 @@ export function FlowyAgentPanel({
 
           if (ctrl.intent === "dismiss_changes") {
             setPendingOperations(null);
+            resetPendingUiCommands();
             setPendingExplanation(null);
             setPendingExecuteNodeIds(null);
             setPendingRunApprovalRequired(true);
@@ -1169,6 +1196,7 @@ export function FlowyAgentPanel({
               await onRunNodeIds(pendingExecuteNodeIds);
               pushAssistant(data.assistantText || "Run triggered for pending execution nodes.");
               setPendingOperations(null);
+              resetPendingUiCommands();
               setPendingExplanation(null);
               setPendingExecuteNodeIds(null);
               setPendingRunApprovalRequired(true);
@@ -1271,12 +1299,16 @@ export function FlowyAgentPanel({
 
         if (mode === "chat") {
           setPendingOperations(null);
+          resetPendingUiCommands();
           setPendingExplanation(null);
           setPendingExecuteNodeIds(null);
           setPendingRunApprovalRequired(true);
           setExecutionIndex(0);
           autoRunCompletedRef.current = true;
         } else {
+          const uiParsed = parseOpenflowUiCommandsFromJson(data.uiCommands);
+          pendingUiCommandsApplyRef.current = uiParsed;
+          setPendingUiCommands(uiParsed);
           setPendingOperations(ops);
           setPendingExplanation(displayText);
           setExecutionIndex(0);
@@ -1314,6 +1346,7 @@ export function FlowyAgentPanel({
       canvasStateMemory,
       enforceCanvasControl,
       requireCautionApproval,
+      resetPendingUiCommands,
     ]
   );
 
@@ -1408,7 +1441,7 @@ export function FlowyAgentPanel({
     activePlanAbortRef.current?.abort();
   }, [isOpen]);
 
-  const sleep = useCallback((ms: number) => new Promise((r) => setTimeout(r, ms)), []);
+  const sleep = useCallback((ms: number) => new Promise<void>((r) => setTimeout(r, ms)), []);
 
   const getFallbackCursorScreen = useCallback((): { x: number; y: number } => {
     return {
@@ -1480,8 +1513,31 @@ export function FlowyAgentPanel({
     [nodeTypeById]
   );
 
-  const handleApprove = useCallback(() => {
-    if (!pendingOperations || !onApplyEdits) return;
+  const handleApprove = useCallback(async () => {
+    if (pendingOperations == null || !onApplyEdits) return;
+    const uiBatch = pendingUiCommandsApplyRef.current;
+    if (uiBatch.length > 0) {
+      const uiDeps: OpenflowAgentExecutorDeps = {
+        sleep,
+        setCursor: (partial) => {
+          if (partial.x !== undefined || partial.y !== undefined) {
+            const x = partial.x ?? cursorPosRef.current.x;
+            const y = partial.y ?? cursorPosRef.current.y;
+            cursorPosRef.current = { x, y };
+            setCursor({ x, y, visible: true });
+          }
+          if (partial.actionLabel !== undefined) {
+            setCursorActionLabel(partial.actionLabel);
+          }
+        },
+        storeUpdateNodeData,
+      };
+      await executeOpenflowAgentCommands(uiBatch, uiDeps);
+    }
+    const uiLabels = uiBatch.map(describeOpenflowUiCommand);
+    pendingUiCommandsApplyRef.current = [];
+    setPendingUiCommands(null);
+
     const remappedOps = pendingOperations.map((op) =>
       remapOperationNodeIds(op, plannedToActualNodeIdRef.current)
     );
@@ -1489,6 +1545,7 @@ export function FlowyAgentPanel({
     onApplyEdits(remappedOps);
     const planRecord: AppliedPlanRecord = {
       operations: opDescriptions,
+      uiCommands: uiLabels.length > 0 ? uiLabels : undefined,
       executedNodeIds: pendingExecuteNodeIds ?? undefined,
       timestamp: Date.now(),
     };
@@ -1509,7 +1566,15 @@ export function FlowyAgentPanel({
     autoRunCompletedRef.current = true;
     setExecutionIndex(0);
     plannedToActualNodeIdRef.current.clear();
-  }, [describeOperation, onApplyEdits, pendingExecuteNodeIds, pendingOperations, updateSessionMessages]);
+  }, [
+    describeOperation,
+    onApplyEdits,
+    pendingExecuteNodeIds,
+    pendingOperations,
+    sleep,
+    storeUpdateNodeData,
+    updateSessionMessages,
+  ]);
 
   const orchestratorDeps = useMemo<OrchestratorDeps>(
     () => ({
@@ -1549,6 +1614,18 @@ export function FlowyAgentPanel({
       setIsExecutingStep(true);
 
       try {
+        const uiBatch = pendingUiCommandsApplyRef.current;
+        if (uiBatch.length > 0) {
+          const uiDeps: OpenflowAgentExecutorDeps = {
+            sleep,
+            setCursor: (partial) =>
+              orchestratorDeps.setCursor(partial as Parameters<OrchestratorDeps["setCursor"]>[0]),
+            storeUpdateNodeData,
+          };
+          await executeOpenflowAgentCommands(uiBatch, uiDeps);
+          pendingUiCommandsApplyRef.current = [];
+          setPendingUiCommands(null);
+        }
         const actualNodeId = await executeOperationWithMouse(op, orchestratorDeps);
         if (originalOp.type === "addNode" && originalOp.nodeId && actualNodeId) {
           plannedToActualNodeIdRef.current.set(originalOp.nodeId, actualNodeId);
@@ -1558,7 +1635,7 @@ export function FlowyAgentPanel({
         setIsExecutingStep(false);
       }
     },
-    [onApplyEdits, orchestratorDeps, pendingOperations]
+    [onApplyEdits, orchestratorDeps, pendingOperations, sleep, storeUpdateNodeData]
   );
 
   const handleApproveStep = useCallback(async () => {
@@ -1572,10 +1649,18 @@ export function FlowyAgentPanel({
   }, []);
 
   const dismissPendingPlan = useCallback(() => {
-    if (pendingOperations && pendingOperations.length > 0) {
-      const opDescriptions = pendingOperations.map((op) => describeOperation(op));
+    const uiDismissLabels =
+      pendingUiCommands && pendingUiCommands.length > 0
+        ? pendingUiCommands.map((c) => describeOpenflowUiCommand(c))
+        : [];
+    if (
+      (pendingOperations && pendingOperations.length > 0) ||
+      uiDismissLabels.length > 0
+    ) {
+      const opDescriptions = (pendingOperations ?? []).map((op) => describeOperation(op));
       const planRecord: AppliedPlanRecord = {
         operations: opDescriptions,
+        uiCommands: uiDismissLabels.length > 0 ? uiDismissLabels : undefined,
         executedNodeIds: pendingExecuteNodeIds ?? undefined,
         timestamp: Date.now(),
       };
@@ -1595,11 +1680,22 @@ export function FlowyAgentPanel({
     autoApplyStartedForOpsRef.current = null;
     plannedToActualNodeIdRef.current.clear();
     setPendingOperations(null);
+    resetPendingUiCommands();
     setPendingExplanation(null);
     setPendingExecuteNodeIds(null);
     resetExecution();
     autoRunCompletedRef.current = true;
-  }, [describeOperation, pendingExecuteNodeIds, pendingOperations, resetExecution, stopAutoRun, updateSessionMessages]);
+  }, [
+    describeOperation,
+    describeOpenflowUiCommand,
+    pendingExecuteNodeIds,
+    pendingOperations,
+    pendingUiCommands,
+    resetExecution,
+    resetPendingUiCommands,
+    stopAutoRun,
+    updateSessionMessages,
+  ]);
 
   useEffect(() => {
     if (!isOpen || !pendingOperations) return;
@@ -1616,11 +1712,11 @@ export function FlowyAgentPanel({
     setPlannerTimelineOpen(true);
   }, [pendingOperations]);
 
-  // Auto-apply mode: run through all pending operations sequentially.
+  // Auto-apply mode: Openflow UI commands first, then pending operations sequentially.
   useEffect(() => {
     if (!isOpen) return;
     if (applyMode !== "auto") return;
-    if (!pendingOperations || !onApplyEdits) return;
+    if (pendingOperations == null || !onApplyEdits) return;
     if (executionIndex !== 0) return;
     // Guard against starting duplicate auto-apply loops for the same plan.
     // This can happen when dependencies update before executionIndex increments.
@@ -1631,13 +1727,34 @@ export function FlowyAgentPanel({
     autoRunIdRef.current = runId;
 
     (async () => {
+      const uiBatch = pendingUiCommandsApplyRef.current;
+      if (uiBatch.length > 0) {
+        const uiDeps: OpenflowAgentExecutorDeps = {
+          sleep,
+          setCursor: (partial) => orchestratorDeps.setCursor(partial as Parameters<OrchestratorDeps["setCursor"]>[0]),
+          storeUpdateNodeData,
+        };
+        await executeOpenflowAgentCommands(uiBatch, uiDeps);
+        pendingUiCommandsApplyRef.current = [];
+        setPendingUiCommands(null);
+      }
       for (let i = 0; i < pendingOperations.length; i++) {
         if (autoRunIdRef.current !== runId) return;
         await applyOperationAtIndex(i);
       }
     })();
     // No cleanup needed beyond runId checks.
-  }, [applyMode, executionIndex, isOpen, onApplyEdits, pendingOperations, applyOperationAtIndex]);
+  }, [
+    applyMode,
+    applyOperationAtIndex,
+    executionIndex,
+    isOpen,
+    onApplyEdits,
+    orchestratorDeps,
+    pendingOperations,
+    sleep,
+    storeUpdateNodeData,
+  ]);
 
   useEffect(() => {
     if (!pendingOperations) {
@@ -1660,13 +1777,14 @@ export function FlowyAgentPanel({
       stopAutoRun();
       setActiveSessionId(id);
       setPendingOperations(null);
+      resetPendingUiCommands();
       setPendingExplanation(null);
       setPendingExecuteNodeIds(null);
       resetExecution();
       setErrorMessage(null);
       setHistoryMenuOpen(false);
     },
-    [resetExecution, stopAutoRun]
+    [resetExecution, resetPendingUiCommands, stopAutoRun]
   );
 
   const handleNewChat = useCallback(() => {
@@ -1676,13 +1794,14 @@ export function FlowyAgentPanel({
     setHistoryMenuOpen(false);
     setInput("");
     setPendingOperations(null);
+    resetPendingUiCommands();
     setPendingExplanation(null);
     setPendingExecuteNodeIds(null);
     setErrorMessage(null);
     setExecutionIndex(0);
     autoRunCompletedRef.current = true;
     setActiveDecomposition(null);
-  }, [createSession]);
+  }, [createSession, resetPendingUiCommands]);
 
   const handleRenameSession = useCallback(
     (sessionId: string) => {
@@ -1708,6 +1827,7 @@ export function FlowyAgentPanel({
 
       stopAutoRun();
       setPendingOperations(null);
+      resetPendingUiCommands();
       setPendingExplanation(null);
       setPendingExecuteNodeIds(null);
       resetExecution();
@@ -1725,7 +1845,7 @@ export function FlowyAgentPanel({
         return remaining;
       });
     },
-    [activeSessionId, createSession, resetExecution, sessions, stopAutoRun]
+    [activeSessionId, createSession, resetExecution, resetPendingUiCommands, sessions, stopAutoRun]
   );
 
   const modeSliderIndex = flowyAgentMode === "assist" ? 0 : 1;
@@ -1817,6 +1937,9 @@ export function FlowyAgentPanel({
   const footerStatusText = [
     isPlanning ? "Flowy is planning a response." : "",
     pendingOperations ? "Canvas changes waiting for your review." : "",
+    pendingUiCommands && pendingUiCommands.length > 0
+      ? `Openflow UI: ${pendingUiCommands.length} step${pendingUiCommands.length === 1 ? "" : "s"} will run before canvas edits.`
+      : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -2102,14 +2225,18 @@ export function FlowyAgentPanel({
                     <SquarePlus className="size-3.5" strokeWidth={2} aria-hidden />
                   </div>
                   <span className="text-xs font-medium leading-[1.4] tracking-[-0.12px] flowy-shimmer-text">
-                    {executionIndex < pendingOperations.length
-                      ? `Building on canvas… (${executionIndex + 1}/${pendingOperations.length})`
-                      : pendingExecuteNodeIds &&
-                          pendingExecuteNodeIds.length > 0 &&
-                          pendingRunApprovalRequired &&
-                          flowyAgentMode === "assist"
-                        ? "Ready to run — approve to execute"
-                        : "Applied to canvas ✓"}
+                    {pendingUiCommands && pendingUiCommands.length > 0
+                      ? applyMode === "auto"
+                        ? `Running Openflow UI… (${pendingUiCommands.length} step${pendingUiCommands.length === 1 ? "" : "s"})`
+                        : `Openflow UI first (${pendingUiCommands.length} step${pendingUiCommands.length === 1 ? "" : "s"})`
+                      : executionIndex < pendingOperations.length
+                        ? `Building on canvas… (${executionIndex + 1}/${pendingOperations.length})`
+                        : pendingExecuteNodeIds &&
+                            pendingExecuteNodeIds.length > 0 &&
+                            pendingRunApprovalRequired &&
+                            flowyAgentMode === "assist"
+                          ? "Ready to run — approve to execute"
+                          : "Applied to canvas ✓"}
                   </span>
                   <span
                     className={`inline-flex shrink-0 text-neutral-300 transition-transform duration-200 ${
@@ -2131,6 +2258,23 @@ export function FlowyAgentPanel({
                           Auto
                         </span>
                       </div>
+                      {pendingUiCommands && pendingUiCommands.length > 0 ? (
+                        <div className="mb-3 px-0.5">
+                          <div className="mb-1.5 text-[10px] font-medium uppercase tracking-wide text-violet-300/90">
+                            Openflow UI (before canvas)
+                          </div>
+                          <ul className="space-y-1">
+                            {pendingUiCommands.map((cmd, uidx) => (
+                              <li
+                                key={`ui-cmd-${uidx}`}
+                                className="text-xs leading-snug text-violet-200/80"
+                              >
+                                {describeOpenflowUiCommand(cmd)}
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      ) : null}
                       {pendingOperations.map((op, idx) => {
                         const status =
                           idx < executionIndex ? "done" : idx === executionIndex ? "next" : "pending";
@@ -2196,7 +2340,9 @@ export function FlowyAgentPanel({
           {footerStatusText}
         </div>
         <div className="relative w-full">
-          {(pendingOperations || isPlanning) && (
+          {(pendingOperations ||
+            isPlanning ||
+            (pendingUiCommands && pendingUiCommands.length > 0)) && (
             <div
               className="pointer-events-none absolute inset-x-2 bottom-full top-[-3rem] rounded-t-[1.25rem] border border-b-0 border-white/10 opacity-80 transition-opacity duration-300"
               aria-hidden
@@ -2210,16 +2356,20 @@ export function FlowyAgentPanel({
                     <LayoutGrid className="size-2.5 text-neutral-300" strokeWidth={2} aria-hidden />
                   </div>
                   <p className="truncate text-xs text-neutral-400">
-                    {executionIndex < pendingOperations.length
+                    {pendingUiCommands && pendingUiCommands.length > 0
                       ? applyMode === "auto"
-                        ? `Building workflow on canvas… (${executionIndex + 1}/${pendingOperations.length})`
-                        : "Apply each step when ready."
-                      : pendingExecuteNodeIds &&
-                          pendingExecuteNodeIds.length > 0 &&
-                          pendingRunApprovalRequired &&
-                          flowyAgentMode === "assist"
-                        ? "Workflow is ready — run to generate?"
-                        : "All edits applied to canvas."}
+                        ? `Running Openflow UI… (${pendingUiCommands.length})`
+                        : `Openflow UI: ${pendingUiCommands.length} step${pendingUiCommands.length === 1 ? "" : "s"} before canvas.`
+                      : executionIndex < pendingOperations.length
+                        ? applyMode === "auto"
+                          ? `Building workflow on canvas… (${executionIndex + 1}/${pendingOperations.length})`
+                          : "Apply each step when ready."
+                        : pendingExecuteNodeIds &&
+                            pendingExecuteNodeIds.length > 0 &&
+                            pendingRunApprovalRequired &&
+                            flowyAgentMode === "assist"
+                          ? "Workflow is ready — run to generate?"
+                          : "All edits applied to canvas."}
                   </p>
                 </div>
                 <div className="flex shrink-0 items-center gap-1">
@@ -2232,9 +2382,12 @@ export function FlowyAgentPanel({
                     <span className="leading-none">Cancel</span>
                     <span className="rounded px-1 font-mono text-[10px] text-neutral-500">Esc</span>
                   </button>
-                  {executionIndex < pendingOperations.length ? (
+                  {(pendingUiCommands && pendingUiCommands.length > 0) ||
+                  executionIndex < pendingOperations.length ? (
                     <>
-                      {(isExecutingStep || isRunning) && (
+                      {applyMode === "auto" &&
+                        (isExecutingStep ||
+                          (pendingUiCommands && pendingUiCommands.length > 0)) && (
                         <button
                           type="button"
                           onClick={() => stopAutoRun()}

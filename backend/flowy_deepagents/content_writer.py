@@ -152,6 +152,10 @@ class FlowyPlanJsonModel(BaseModel):
 
     assistantText: str = ""
     operations: List[Dict[str, Any]] = Field(default_factory=list)
+    uiCommands: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Optional Openflow-only DOM automation; client executes after approval.",
+    )
     requiresApproval: bool = True
     approvalReason: str = ""
     executeNodeIds: Optional[List[str]] = None
@@ -1443,6 +1447,7 @@ def _build_user_prompt(
     model_catalog: Optional[Dict[str, List[Dict[str, str]]]] = None,
     canvas_state_memory: Optional[Dict[str, Any]] = None,
     intent_signals: Optional[UserIntentSignalsModel] = None,
+    openflow_ui_snapshot: Optional[str] = None,
     *,
     closing_instruction: str,
 ) -> str:
@@ -1489,8 +1494,17 @@ def _build_user_prompt(
         else ""
     )
 
+    snap_block = ""
+    if openflow_ui_snapshot and str(openflow_ui_snapshot).strip():
+        snap_block = (
+            "## Openflow UI snapshot (live, captured in the client — use refs below for uiCommands)\n"
+            + str(openflow_ui_snapshot).strip()
+            + "\n\n"
+        )
+
     return (
-        f"Message: {message}\n\n"
+        snap_block
+        + f"Message: {message}\n\n"
         + _format_canvas_operation_hints_block(intent_signals)
         + attachments_brief
         + (
@@ -1516,7 +1530,19 @@ def _build_user_prompt(
     )
 
 
-CLOSE_CANVAS_PLAN = "Return the planned edit operations as a single JSON object."
+CLOSE_CANVAS_PLAN = (
+    "Return a single JSON object with assistantText, operations, optional uiCommands, requiresApproval, "
+    "approvalReason, executeNodeIds, runApprovalRequired.\n\n"
+    "Optional uiCommands: array of Openflow-only UI steps (no external URLs). The client runs them **before** "
+    "applying operations when the user approves.\n"
+    "Each item has \"type\": one of snapshot, click, dblclick, hover, scrollIntoView, fill, type, press, wait, waitFor.\n"
+    "Types that need a target include \"target\": an object with \"kind\": ref | dataId | agentNodeType | flowNode | handle, plus:\n"
+    "  ref → \"ref\": string (e.g. ui.addNode); dataId → \"value\": string; agentNodeType → \"nodeType\": string; "
+    "flowNode → \"nodeId\": string; handle → \"nodeId\": string and optional \"handleId\": string.\n"
+    "fill/type need \"text\": string; wait needs \"ms\": number; waitFor optional \"timeoutMs\": number; press needs \"key\": string.\n"
+    "Prefer **operations** for graph topology (nodes/edges/groups). Use **uiCommands** only when real menus/toolbars/clicks are required.\n"
+    "Keep uiCommands minimal; omit or use [] when not needed."
+)
 
 CLOSE_PLAN_ADVISOR = (
     "MODE: CHAT (advisory only). Do not output edit operations or claim the canvas changed.\n"
@@ -1667,6 +1693,7 @@ def _run_builder_stage(
     chat_history: List[Dict[str, str]],
     message_for_toolbar_validation: str,
     intent_signals: Optional[UserIntentSignalsModel] = None,
+    openflow_ui_snapshot: Optional[str] = None,
 ) -> Tuple[Dict[str, Any], bool, List[str], str]:
     """
     Subagent stage: generate operations, normalize, optimize, validate with retries.
@@ -1695,6 +1722,7 @@ def _run_builder_stage(
             model_catalog=model_catalog,
             canvas_state_memory=canvas_state_memory,
             intent_signals=intent_signals,
+            openflow_ui_snapshot=openflow_ui_snapshot,
             closing_instruction=CLOSE_CANVAS_PLAN,
         )
         if attempt > 0 and last_errors:
@@ -1786,6 +1814,10 @@ def main() -> None:
         attachments = _coerce_image_attachments(payload.get("attachments"))
         model_catalog = _coerce_model_catalog(payload.get("modelCatalog"))
         canvas_state_memory = _coerce_canvas_state_memory(payload.get("canvasStateMemory"))
+        openflow_ui_snapshot = payload.get("openflowUiSnapshot")
+        openflow_ui_snapshot_str = (
+            str(openflow_ui_snapshot).strip() if isinstance(openflow_ui_snapshot, str) and openflow_ui_snapshot.strip() else None
+        )
         try:
             hist_max_turns = int(os.environ.get("FLOWY_CHAT_HISTORY_MAX_TURNS", "14"))
         except ValueError:
@@ -2003,6 +2035,7 @@ def main() -> None:
             chat_history=chat_history,
             message_for_toolbar_validation=message,
             intent_signals=intent_signals,
+            openflow_ui_snapshot=openflow_ui_snapshot_str,
         )
 
         ok = validated_ok
@@ -2010,15 +2043,18 @@ def main() -> None:
             parsed = {
                 "assistantText": "Deep planner failed to produce valid JSON.",
                 "operations": [],
+                "uiCommands": [],
                 "requiresApproval": True,
                 "approvalReason": "Planning failed.",
                 "error": "invalid_json_or_empty",
                 "debugLastText": last_text_debug,
             }
         elif not validated_ok:
+            prev_ui = parsed.get("uiCommands") if isinstance(parsed, dict) else []
             parsed = {
                 "assistantText": parsed.get("assistantText", "Planning failed."),
                 "operations": parsed.get("operations", []),
+                "uiCommands": prev_ui if isinstance(prev_ui, list) else [],
                 "requiresApproval": True,
                 "approvalReason": "Planning failed validation. User approval needed or adjust constraints.",
                 "error": "validation_failed",
@@ -2031,6 +2067,7 @@ def main() -> None:
             "mode": "plan",
             "assistantText": parsed.get("assistantText", ""),
             "operations": parsed.get("operations", []),
+            "uiCommands": parsed.get("uiCommands") if isinstance(parsed.get("uiCommands"), list) else [],
             "requiresApproval": False,
             "approvalReason": "",
             "agentMode": agent_mode,
