@@ -36,6 +36,7 @@ import {
   saveDockedPreference,
   saveFlowyAgentMode,
   saveFlowyPanelSessions,
+  saveStyleMemory,
   styleMemoryToPromptContext,
   type FlowyAgentMode,
   type StoredChatSession,
@@ -322,8 +323,10 @@ export function FlowyAgentPanel({
   selectedNodeIds?: string[];
 }) {
   const { screenToFlowPosition, setCenter, getViewport } = useReactFlow();
+  const workflowId = useWorkflowStore((s) => s.workflowId);
   const storeUpdateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const setNavigationTarget = useWorkflowStore((s) => s.setNavigationTarget);
+  const sessionScopeId = workflowId || "global";
   const applyServerWorkflowState = useCallback((wf: any) => {
     if (!wf || !Array.isArray(wf.nodes) || !Array.isArray(wf.edges)) return;
     useWorkflowStore.setState((state) => ({
@@ -441,16 +444,21 @@ export function FlowyAgentPanel({
   const styleMemoryRef = useRef<StyleMemory | null>(null);
   styleMemoryRef.current = styleMemory;
 
-  // Hydrate sessions from localStorage once on client (after SSR default seed).
+  // Hydrate sessions from localStorage for the current workflow scope.
   useEffect(() => {
-    const loaded = loadFlowyPanelSessions();
+    const loaded = loadFlowyPanelSessions(sessionScopeId);
     if (loaded) {
       setSessions(loaded.sessions as ChatSession[]);
       setActiveSessionId(loaded.activeId);
+    } else {
+      const fresh = createEmptyFlowySession() as ChatSession;
+      setSessions([{ ...fresh, title: "New Chat" }]);
+      setActiveSessionId(fresh.id);
     }
-    setStyleMemory(loadStyleMemory());
+    setCustomInstructions(loadCustomInstructions(sessionScopeId));
+    setStyleMemory(loadStyleMemory(sessionScopeId));
     setStorageReady(true);
-  }, []);
+  }, [sessionScopeId]);
 
   useEffect(() => {
     // Ensure there is always an active session (handles initial render safely).
@@ -463,12 +471,17 @@ export function FlowyAgentPanel({
   // Persist chat sessions + active id
   useEffect(() => {
     if (!storageReady || sessions.length === 0 || !activeSessionId) return;
-    saveFlowyPanelSessions(sessions as StoredChatSession[], activeSessionId);
-  }, [storageReady, sessions, activeSessionId]);
+    saveFlowyPanelSessions(sessions as StoredChatSession[], activeSessionId, sessionScopeId);
+  }, [storageReady, sessions, activeSessionId, sessionScopeId]);
 
   useEffect(() => {
-    saveCustomInstructions(customInstructions);
-  }, [customInstructions]);
+    saveCustomInstructions(customInstructions, sessionScopeId);
+  }, [customInstructions, sessionScopeId]);
+
+  useEffect(() => {
+    if (!styleMemory) return;
+    saveStyleMemory(styleMemory, sessionScopeId);
+  }, [sessionScopeId, styleMemory]);
 
   useEffect(() => {
     saveDockedPreference(isDocked);

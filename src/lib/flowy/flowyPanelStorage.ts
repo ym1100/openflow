@@ -33,6 +33,11 @@ export type StoredChatSession = {
   createdAt: number;
 };
 
+function _scopedKey(baseKey: string, scopeId?: string | null): string {
+  const cleanScope = typeof scopeId === "string" ? scopeId.trim() : "";
+  return cleanScope ? `${baseKey}:${cleanScope}` : baseKey;
+}
+
 export function createEmptyFlowySession(): StoredChatSession {
   const id = `chat-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   return { id, title: "New Chat", messages: [], createdAt: Date.now() };
@@ -63,15 +68,23 @@ export function parseStoredSessions(raw: string | null): StoredChatSession[] | n
   }
 }
 
-export function loadFlowyPanelSessions(): { sessions: StoredChatSession[]; activeId: string } | null {
+export function loadFlowyPanelSessions(
+  scopeId?: string | null
+): { sessions: StoredChatSession[]; activeId: string } | null {
   if (typeof window === "undefined") return null;
   try {
-    const sessions = parseStoredSessions(localStorage.getItem(FLOWY_SESSIONS_KEY));
+    const scopedSessionsKey = _scopedKey(FLOWY_SESSIONS_KEY, scopeId);
+    const scopedActiveKey = _scopedKey(FLOWY_ACTIVE_SESSION_KEY, scopeId);
+    let sessions = parseStoredSessions(localStorage.getItem(scopedSessionsKey));
+    // Backward-compatibility: if scoped storage is empty, allow fallback to old global key.
+    if (!sessions?.length && scopeId) {
+      sessions = parseStoredSessions(localStorage.getItem(FLOWY_SESSIONS_KEY));
+    }
     if (!sessions?.length) return null;
     const trimmed = [...sessions]
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, FLOWY_MAX_STORED_SESSIONS);
-    const storedActive = localStorage.getItem(FLOWY_ACTIVE_SESSION_KEY);
+    const storedActive = localStorage.getItem(scopedActiveKey) ?? (scopeId ? localStorage.getItem(FLOWY_ACTIVE_SESSION_KEY) : null);
     const activeId =
       storedActive && trimmed.some((s) => s.id === storedActive) ? storedActive : trimmed[0].id;
     return { sessions: trimmed, activeId };
@@ -80,32 +93,42 @@ export function loadFlowyPanelSessions(): { sessions: StoredChatSession[]; activ
   }
 }
 
-export function saveFlowyPanelSessions(sessions: StoredChatSession[], activeId: string): void {
+export function saveFlowyPanelSessions(
+  sessions: StoredChatSession[],
+  activeId: string,
+  scopeId?: string | null
+): void {
   if (typeof window === "undefined") return;
   try {
+    const scopedSessionsKey = _scopedKey(FLOWY_SESSIONS_KEY, scopeId);
+    const scopedActiveKey = _scopedKey(FLOWY_ACTIVE_SESSION_KEY, scopeId);
     const trimmed = [...sessions]
       .sort((a, b) => b.createdAt - a.createdAt)
       .slice(0, FLOWY_MAX_STORED_SESSIONS);
-    localStorage.setItem(FLOWY_SESSIONS_KEY, JSON.stringify(trimmed));
-    localStorage.setItem(FLOWY_ACTIVE_SESSION_KEY, activeId);
+    localStorage.setItem(scopedSessionsKey, JSON.stringify(trimmed));
+    localStorage.setItem(scopedActiveKey, activeId);
   } catch {
     /* quota or private mode */
   }
 }
 
-export function loadCustomInstructions(): string {
+export function loadCustomInstructions(scopeId?: string | null): string {
   if (typeof window === "undefined") return "";
   try {
-    return localStorage.getItem(FLOWY_CUSTOM_INSTRUCTIONS_KEY) ?? "";
+    const scopedKey = _scopedKey(FLOWY_CUSTOM_INSTRUCTIONS_KEY, scopeId);
+    const scoped = localStorage.getItem(scopedKey);
+    if (scoped !== null) return scoped;
+    if (scopeId) return localStorage.getItem(FLOWY_CUSTOM_INSTRUCTIONS_KEY) ?? "";
+    return "";
   } catch {
     return "";
   }
 }
 
-export function saveCustomInstructions(text: string): void {
+export function saveCustomInstructions(text: string, scopeId?: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(FLOWY_CUSTOM_INSTRUCTIONS_KEY, text);
+    localStorage.setItem(_scopedKey(FLOWY_CUSTOM_INSTRUCTIONS_KEY, scopeId), text);
   } catch {
     /* ignore */
   }
@@ -166,10 +189,11 @@ const EMPTY_STYLE_MEMORY: StyleMemory = {
   commonPatterns: [],
 };
 
-export function loadStyleMemory(): StyleMemory {
+export function loadStyleMemory(scopeId?: string | null): StyleMemory {
   if (typeof window === "undefined") return { ...EMPTY_STYLE_MEMORY };
   try {
-    const raw = localStorage.getItem(FLOWY_STYLE_MEMORY_KEY);
+    const scopedKey = _scopedKey(FLOWY_STYLE_MEMORY_KEY, scopeId);
+    const raw = localStorage.getItem(scopedKey) ?? (scopeId ? localStorage.getItem(FLOWY_STYLE_MEMORY_KEY) : null);
     if (!raw) return { ...EMPTY_STYLE_MEMORY };
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object") return { ...EMPTY_STYLE_MEMORY };
@@ -184,7 +208,7 @@ export function loadStyleMemory(): StyleMemory {
   }
 }
 
-export function saveStyleMemory(memory: StyleMemory): void {
+export function saveStyleMemory(memory: StyleMemory, scopeId?: string | null): void {
   if (typeof window === "undefined") return;
   try {
     const trimmed: StyleMemory = {
@@ -193,7 +217,7 @@ export function saveStyleMemory(memory: StyleMemory): void {
       preferredAspectRatios: memory.preferredAspectRatios.slice(0, 8),
       commonPatterns: memory.commonPatterns.slice(0, 10),
     };
-    localStorage.setItem(FLOWY_STYLE_MEMORY_KEY, JSON.stringify(trimmed));
+    localStorage.setItem(_scopedKey(FLOWY_STYLE_MEMORY_KEY, scopeId), JSON.stringify(trimmed));
   } catch {
     /* ignore */
   }
