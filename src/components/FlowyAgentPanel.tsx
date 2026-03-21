@@ -324,6 +324,16 @@ export function FlowyAgentPanel({
   const { screenToFlowPosition, setCenter, getViewport } = useReactFlow();
   const storeUpdateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const setNavigationTarget = useWorkflowStore((s) => s.setNavigationTarget);
+  const applyServerWorkflowState = useCallback((wf: any) => {
+    if (!wf || !Array.isArray(wf.nodes) || !Array.isArray(wf.edges)) return;
+    useWorkflowStore.setState((state) => ({
+      ...state,
+      nodes: wf.nodes,
+      edges: wf.edges,
+      groups: wf.groups ?? {},
+      hasUnsavedChanges: true,
+    }));
+  }, []);
 
   const flowToScreenPosition = useCallback(
     (pos: { x: number; y: number }) => {
@@ -668,24 +678,129 @@ export function FlowyAgentPanel({
         if (opts?.decompositionStages) body.decompositionStages = opts.decompositionStages;
         if (opts?.runQualityCheck) body.runQualityCheck = true;
 
-        const res = await fetch("/api/flowy/plan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          signal: abortController.signal,
-          body: JSON.stringify(body),
-        });
+        const useStreaming = process.env.NEXT_PUBLIC_FLOWY_STREAM_PLAN === "1";
+        const useBackendAutoLoop =
+          process.env.NEXT_PUBLIC_FLOWY_BACKEND_AUTO_LOOP === "1" &&
+          agentModeAtStart === "auto";
+        const parseSseLines = (buffer: string) => {
+          const events: Array<{ event: string; data: any }> = [];
+          let idx: number;
+          while ((idx = buffer.indexOf("\n\n")) !== -1) {
+            const chunk = buffer.slice(0, idx).trim();
+            buffer = buffer.slice(idx + 2);
+            if (!chunk) continue;
+            const lines = chunk.split("\n");
+            let event = "message";
+            let data = "";
+            for (const line of lines) {
+              if (line.startsWith("event:")) event = line.slice(6).trim();
+              if (line.startsWith("data:")) data += line.slice(5).trim();
+            }
+            try {
+              events.push({ event, data: data ? JSON.parse(data) : null });
+            } catch {
+              events.push({ event, data: data || null });
+            }
+          }
+          return { events, rest: buffer };
+        };
 
-        if (!res.ok) {
-          const err = await res.json().catch(() => null);
-          throw new Error(err?.error || `Plan failed (${res.status})`);
+        let data: (({ ok: boolean; error?: string; progressEvents?: Array<{ progress: string; detail: string }> } & FlowyPlanResponse) & {
+          debugLastText?: string;
+        }) | null = null;
+
+        if (useBackendAutoLoop) {
+          const res = await fetch("/api/flowy/orchestrate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: abortController.signal,
+            body: JSON.stringify({
+              ...body,
+              maxIterations: autoContinueMaxSteps,
+              autoApply: true,
+              idempotencyKey: `auto-${Date.now()}`,
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => null);
+            throw new Error(err?.error || `Orchestration failed (${res.status})`);
+          }
+          const orch = await res.json();
+          if (!orch?.ok) {
+            throw new Error(orch?.error || "Orchestration failed");
+          }
+          if (orch.finalWorkflowState) {
+            applyServerWorkflowState(orch.finalWorkflowState);
+          }
+          const lastStep = Array.isArray(orch.steps) && orch.steps.length > 0 ? orch.steps[orch.steps.length - 1] : null;
+          data = {
+            ok: true,
+            mode: "chat",
+            assistantText:
+              typeof lastStep?.assistantText === "string" && lastStep.assistantText.trim()
+                ? lastStep.assistantText
+                : `Completed ${orch.iterations ?? 1} backend orchestration iteration(s).`,
+            operations: [],
+          } as any;
+          setPlannerProgress("Backend orchestration complete.");
+        } else if (useStreaming) {
+          const streamRes = await fetch("/api/flowy/plan/stream", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: abortController.signal,
+            body: JSON.stringify(body),
+          });
+          if (!streamRes.ok || !streamRes.body) {
+            const errText = await streamRes.text().catch(() => "");
+            throw new Error(errText || `Plan stream failed (${streamRes.status})`);
+          }
+          const reader = streamRes.body.getReader();
+          const decoder = new TextDecoder();
+          let buffer = "";
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            const parsed = parseSseLines(buffer);
+            buffer = parsed.rest;
+            for (const evt of parsed.events) {
+              if (evt.event === "progress" && evt.data) {
+                const p = evt.data as { progress?: string; detail?: string };
+                setPlannerProgress(p.detail || p.progress || "Planning...");
+              } else if (evt.event === "result" && evt.data) {
+                data = evt.data as any;
+              } else if (evt.event === "error" && evt.data) {
+                const msg =
+                  typeof evt.data?.error === "string"
+                    ? evt.data.error
+                    : "Planner stream returned an error.";
+                throw new Error(msg);
+              }
+            }
+          }
+          if (!data) throw new Error("Planner stream ended without result payload.");
+        } else {
+          const res = await fetch("/api/flowy/plan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            signal: abortController.signal,
+            body: JSON.stringify(body),
+          });
+
+          if (!res.ok) {
+            const err = await res.json().catch(() => null);
+            throw new Error(err?.error || `Plan failed (${res.status})`);
+          }
+
+          data = (await res.json()) as any;
+          if (data.progressEvents?.length) {
+            const last = data.progressEvents[data.progressEvents.length - 1];
+            setPlannerProgress(last.detail || last.progress);
+          }
         }
 
-        const data = (await res.json()) as ({ ok: boolean; error?: string; progressEvents?: Array<{ progress: string; detail: string }> } & FlowyPlanResponse) & {
-          debugLastText?: string;
-        };
-        if (data.progressEvents?.length) {
-          const last = data.progressEvents[data.progressEvents.length - 1];
-          setPlannerProgress(last.detail || last.progress);
+        if (!data) {
+          throw new Error("Planner returned empty response.");
         }
         if (!data.ok) {
           const debugSnippet =
@@ -748,7 +863,7 @@ export function FlowyAgentPanel({
         setPlannerProgress(null);
       }
     },
-    [contextNodeIds, customInstructions, imageAttachments, isPlanning, scrollToBottom, stateForRequest, updateSessionMessages]
+    [contextNodeIds, customInstructions, imageAttachments, isPlanning, scrollToBottom, stateForRequest, updateSessionMessages, autoContinueMaxSteps, applyServerWorkflowState]
   );
 
   const handlePlan = useCallback(async () => {

@@ -1,8 +1,19 @@
 import { applyEditOperations } from "@/lib/chat/editOperations";
 import { NextResponse } from "next/server";
 import { isFileProjectId, loadWorkflowFromFileProject, saveWorkflowToFileProject } from "@/lib/projectFileIO";
+import { computeWorkflowHash } from "@/lib/flowy/workflowHash";
 
 export const runtime = "nodejs";
+
+const IDEMPOTENCY_CACHE_TTL_MS = 5 * 60 * 1000;
+const applyIdempotencyCache = new Map<string, { at: number; payload: any }>();
+
+function cleanupIdempotencyCache() {
+  const now = Date.now();
+  for (const [k, v] of applyIdempotencyCache.entries()) {
+    if (now - v.at > IDEMPOTENCY_CACHE_TTL_MS) applyIdempotencyCache.delete(k);
+  }
+}
 
 export async function POST(request: Request) {
   try {
@@ -14,6 +25,8 @@ export async function POST(request: Request) {
         groups?: Record<string, any>;
       };
       operations?: any[];
+      idempotencyKey?: string;
+      expectedWorkflowHash?: string;
     };
 
     const workflowStateFromBody = body.workflowState ?? null;
@@ -51,6 +64,31 @@ export async function POST(request: Request) {
       );
     }
 
+    cleanupIdempotencyCache();
+    const idempotencyKey = typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
+    const expectedWorkflowHash =
+      typeof body.expectedWorkflowHash === "string" ? body.expectedWorkflowHash.trim() : "";
+    const currentHash = computeWorkflowHash(workflowState);
+
+    if (expectedWorkflowHash && expectedWorkflowHash !== currentHash) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "workflow_version_conflict",
+          expectedWorkflowHash,
+          currentWorkflowHash: currentHash,
+        },
+        { status: 409 }
+      );
+    }
+
+    const idemScope = body.projectId || "inline-workflow";
+    const idemCacheKey = idempotencyKey ? `${idemScope}:${idempotencyKey}` : "";
+    if (idemCacheKey && applyIdempotencyCache.has(idemCacheKey)) {
+      const cached = applyIdempotencyCache.get(idemCacheKey)!;
+      return NextResponse.json({ ...cached.payload, idempotentReplay: true });
+    }
+
     const result = applyEditOperations(operations as any, {
       nodes: workflowState.nodes,
       edges: workflowState.edges,
@@ -64,7 +102,27 @@ export async function POST(request: Request) {
       await saveWorkflowToFileProject(filePath, loadedWorkflow);
     }
 
-    return NextResponse.json({ ok: true, ...result });
+    const nextWorkflowHash = computeWorkflowHash({
+      nodes: result.nodes,
+      edges: result.edges,
+      groups: result.groups,
+    });
+
+    const responsePayload = {
+      ok: true,
+      ...result,
+      workflowHash: nextWorkflowHash,
+      previousWorkflowHash: currentHash,
+    };
+
+    if (idemCacheKey) {
+      applyIdempotencyCache.set(idemCacheKey, {
+        at: Date.now(),
+        payload: responsePayload,
+      });
+    }
+
+    return NextResponse.json(responsePayload);
   } catch (err) {
     console.error("[Flowy apply] error:", err);
     return NextResponse.json({ ok: false, error: "Failed to apply operations" }, { status: 500 });
