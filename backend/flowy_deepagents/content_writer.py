@@ -6,7 +6,7 @@ import json
 import os
 import sys
 from collections import Counter
-from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, Union, cast
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage  # type: ignore
 from langchain_openai import ChatOpenAI  # type: ignore
@@ -65,6 +65,46 @@ class RouterIntentModel(BaseModel):
     reason: str = ""
 
 
+# Edit-operation kinds the parser can prioritize (must stay aligned with planner_schema operationTypes).
+CanvasOperationHint = Literal[
+    "addNode",
+    "removeNode",
+    "clearCanvas",
+    "updateNode",
+    "addEdge",
+    "removeEdge",
+    "moveNode",
+    "createGroup",
+    "deleteGroup",
+    "updateGroup",
+    "setNodeGroup",
+]
+
+_CANVAS_OP_HINTS_SET: Set[str] = {
+    "addNode",
+    "removeNode",
+    "clearCanvas",
+    "updateNode",
+    "addEdge",
+    "removeEdge",
+    "moveNode",
+    "createGroup",
+    "deleteGroup",
+    "updateGroup",
+    "setNodeGroup",
+}
+
+
+def _sanitize_canvas_operation_hints(raw: Any) -> List[CanvasOperationHint]:
+    if not isinstance(raw, list):
+        return []
+    out: List[CanvasOperationHint] = []
+    for x in raw[:16]:
+        if isinstance(x, str) and x in _CANVAS_OP_HINTS_SET:
+            out.append(cast(CanvasOperationHint, x))
+    return out
+
+
 class AgentControlIntentModel(BaseModel):
     intent: Literal[
         "none",
@@ -93,6 +133,17 @@ class UserIntentSignalsModel(BaseModel):
     asksModelTune: bool = False
     asksEaseCurveEdit: bool = False
     asksSwitchRulesEdit: bool = False
+    asksExecuteNodes: bool = Field(
+        default=False,
+        description="True when the user primarily wants to run/generate/execute existing nodes (not rewire the graph).",
+    )
+    canvasOperationHints: List[CanvasOperationHint] = Field(
+        default_factory=list,
+        description=(
+            "Ordered list of EditOperation `type` values implied by the user message; "
+            "first entry is the strongest signal. Empty when not a structural canvas edit."
+        ),
+    )
     rationale: str = ""
 
 
@@ -1297,19 +1348,30 @@ def _parse_user_intent_signals(
     system_prompt = (
         "You extract structured intent signals for a visual workflow assistant.\n"
         "Return ONLY JSON matching UserIntentSignalsModel.\n"
-        "Set each field to true only when the user's request clearly implies it."
+        "Set each boolean to true only when the user's request clearly implies it.\n"
+        "For canvasOperationHints: output an ordered list of EditOperation type strings that best match "
+        "what the user wants done to the **graph** (canvas). First item = strongest intent. "
+        "Use an empty list when the message is pure chat, control-only, or unrelated to graph edits.\n"
+        "Choose the **most specific** operation type(s); e.g. full reset → [\"clearCanvas\"] not many removeNode; "
+        "connect two nodes → [\"addEdge\"]; delete selection → [\"removeNode\"]; tweak prompt/model → [\"updateNode\"].\n"
+        "If the user wants both structure change and running generators, include edit hints **and** set asksExecuteNodes=true."
     )
     user_prompt = (
         f"UserMessage:\n{msg}\n\n"
         "Classify signals:\n"
         "- visualAssessmentRequest: asks critique/review/quality opinion on images/results\n"
-        "- planEditRequest: asks to edit/update/remove/reorder existing stages/plan\n"
+        "- planEditRequest: asks to edit/update/remove/reorder existing stages/plan (checklist), not canvas nodes\n"
         "- asksUpscale: asks to upscale image result\n"
         "- asksSplitGrid: asks split into grid/layout variants\n"
         "- asksExtractFrame: asks extract frame from video\n"
         "- asksModelTune: asks model/provider/parameters tuning\n"
         "- asksEaseCurveEdit: asks easing/bezier/output duration edits\n"
         "- asksSwitchRulesEdit: asks switch/conditional rule edits\n"
+        "- asksExecuteNodes: run/generate/render/execute now (focus on firing nodes, not redrawing graph)\n"
+        "- canvasOperationHints: ordered list, each value one of:\n"
+        "  addNode, removeNode, clearCanvas, updateNode, addEdge, removeEdge, moveNode, "
+        "createGroup, deleteGroup, updateGroup, setNodeGroup\n"
+        "- rationale: one short sentence on why you chose the hints\n"
         "Return ONLY JSON."
     )
     lc_messages: List[Any] = [SystemMessage(content=system_prompt)]
@@ -1329,10 +1391,48 @@ def _parse_user_intent_signals(
         raw = str(getattr(resp, "content", "") or "")
         data = json.loads(raw) if raw.strip() else {}
         if isinstance(data, dict):
-            return UserIntentSignalsModel(**data)
+            hint_list = _sanitize_canvas_operation_hints(data.pop("canvasOperationHints", None))
+            try:
+                return UserIntentSignalsModel(**data, canvasOperationHints=hint_list)
+            except Exception:
+                return UserIntentSignalsModel(canvasOperationHints=hint_list)
     except Exception:
         pass
     return UserIntentSignalsModel()
+
+
+def _format_canvas_operation_hints_block(intent_signals: Optional[UserIntentSignalsModel]) -> str:
+    if not intent_signals:
+        return ""
+    hints = list(intent_signals.canvasOperationHints or [])
+    exec_line = ""
+    if intent_signals.asksExecuteNodes:
+        exec_line = (
+            "Execution intent: the user wants to **run/generate** on the current graph — "
+            "set `executeNodeIds` to the right targets when appropriate.\n"
+        )
+    if not hints and not exec_line:
+        return ""
+    lines = [
+        "## Parsed canvas edit hints (from intent parser; follow unless impossible given workflow JSON)",
+        exec_line,
+    ]
+    if hints:
+        lines.append(
+            "Preferred `operations[].type` values, **in order** (first = strongest). "
+            "Pick the **minimal** ops that satisfy the user; do not use a weaker substitute when a clearer type exists."
+        )
+        lines.append(f"- canvasOperationHints: {json.dumps(hints, ensure_ascii=False)}")
+        lines.append(
+            "Mapping guide: "
+            "new node / add X → addNode; delete one node → removeNode; wipe whole graph → clearCanvas; "
+            "change prompt/model/settings → updateNode; connect/link/wire → addEdge; disconnect → removeEdge; "
+            "reposition/layout → moveNode; box multiple nodes → createGroup; remove frame only → deleteGroup; "
+            "rename/recolor/lock group → updateGroup; assign node to group → setNodeGroup."
+        )
+    if (intent_signals.rationale or "").strip():
+        lines.append(f"- parser rationale: {intent_signals.rationale.strip()}")
+    return "\n".join(line for line in lines if line) + "\n\n"
 
 
 def _build_user_prompt(
@@ -1342,6 +1442,7 @@ def _build_user_prompt(
     attachments: Optional[List[Dict[str, str]]] = None,
     model_catalog: Optional[Dict[str, List[Dict[str, str]]]] = None,
     canvas_state_memory: Optional[Dict[str, Any]] = None,
+    intent_signals: Optional[UserIntentSignalsModel] = None,
     *,
     closing_instruction: str,
 ) -> str:
@@ -1390,6 +1491,7 @@ def _build_user_prompt(
 
     return (
         f"Message: {message}\n\n"
+        + _format_canvas_operation_hints_block(intent_signals)
         + attachments_brief
         + (
             "Project model catalog (use exact modelId values from here when setting/changing models):\n"
@@ -1592,6 +1694,7 @@ def _run_builder_stage(
             attachments=attachments,
             model_catalog=model_catalog,
             canvas_state_memory=canvas_state_memory,
+            intent_signals=intent_signals,
             closing_instruction=CLOSE_CANVAS_PLAN,
         )
         if attempt > 0 and last_errors:
@@ -1964,6 +2067,7 @@ def main() -> None:
             "validationOk": bool(ok),
             "qualityCheckRequested": bool(run_quality_check),
         }
+        out["intentSignals"] = intent_signals.model_dump()
         if not ok:
             out["error"] = parsed.get("error", "deep_agent_planning_failed")
 

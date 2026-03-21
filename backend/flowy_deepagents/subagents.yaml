@@ -5,6 +5,7 @@ roles:
     responsibilities:
       - "Classify control intents (next/prev/goto/show/clear/stop/run/dismiss)."
       - "Extract workflow-intent signals for planner and validator checks."
+      - "Emit canvasOperationHints: ordered EditOperation type names (addNode, removeNode, clearCanvas, updateNode, addEdge, removeEdge, moveNode, createGroup, deleteGroup, updateGroup, setNodeGroup) so the builder picks the best op for the ask."
       - "Prefer semantic understanding over keyword matching."
     constraints:
       - "Must return schema-valid JSON only."
@@ -13,6 +14,8 @@ roles:
       fields:
         - agentControl.intent
         - agentControl.stageNumber
+        - intentSignals.canvasOperationHints
+        - intentSignals.asksExecuteNodes
         - intentSignals
         - rationale
 

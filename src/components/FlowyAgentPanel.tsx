@@ -144,6 +144,20 @@ type FlowyPlanResponse = {
     validationOk?: boolean;
     qualityCheckRequested?: boolean;
   };
+  /** LLM parser output: preferred EditOperation types (ordered) + execution bias. */
+  intentSignals?: {
+    canvasOperationHints?: string[];
+    asksExecuteNodes?: boolean;
+    rationale?: string;
+    visualAssessmentRequest?: boolean;
+    planEditRequest?: boolean;
+    asksUpscale?: boolean;
+    asksSplitGrid?: boolean;
+    asksExtractFrame?: boolean;
+    asksModelTune?: boolean;
+    asksEaseCurveEdit?: boolean;
+    asksSwitchRulesEdit?: boolean;
+  };
   /** `chat` = conversational reply only, `plan` = edit operations, `control` = backend-classified control intent. */
   mode?: "chat" | "plan" | "control";
   agentControl?: {
