@@ -143,6 +143,34 @@ type ChatImageAttachment = {
   dataUrl: string;
 };
 
+function remapOperationNodeIds(op: EditOperation, idMap: Map<string, string>): EditOperation {
+  const mapId = (id: string | undefined): string | undefined => (id ? idMap.get(id) ?? id : id);
+
+  switch (op.type) {
+    case "addEdge":
+      return {
+        ...op,
+        source: mapId(op.source) ?? op.source,
+        target: mapId(op.target) ?? op.target,
+      };
+    case "updateNode":
+    case "removeNode":
+    case "moveNode":
+    case "setNodeGroup":
+      return {
+        ...op,
+        nodeId: mapId(op.nodeId) ?? op.nodeId,
+      } as EditOperation;
+    case "createGroup":
+      return {
+        ...op,
+        nodeIds: op.nodeIds.map((id) => mapId(id) ?? id),
+      };
+    default:
+      return op;
+  }
+}
+
 function _escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
@@ -606,6 +634,7 @@ export function FlowyAgentPanel({
   const autoRunIdRef = useRef(0);
   const autoRunCompletedRef = useRef(false);
   const autoApplyStartedForOpsRef = useRef<EditOperation[] | null>(null);
+  const plannedToActualNodeIdRef = useRef<Map<string, string>>(new Map());
   const activePlanAbortRef = useRef<AbortController | null>(null);
   const lastGoalRef = useRef<string | null>(null);
   const [activeDecomposition, setActiveDecomposition] = useState<DecompositionInfo | null>(null);
@@ -1263,8 +1292,11 @@ export function FlowyAgentPanel({
 
   const handleApprove = useCallback(() => {
     if (!pendingOperations || !onApplyEdits) return;
-    const opDescriptions = pendingOperations.map((op) => describeOperation(op));
-    onApplyEdits(pendingOperations);
+    const remappedOps = pendingOperations.map((op) =>
+      remapOperationNodeIds(op, plannedToActualNodeIdRef.current)
+    );
+    const opDescriptions = remappedOps.map((op) => describeOperation(op));
+    onApplyEdits(remappedOps);
     const planRecord: AppliedPlanRecord = {
       operations: opDescriptions,
       executedNodeIds: pendingExecuteNodeIds ?? undefined,
@@ -1286,6 +1318,7 @@ export function FlowyAgentPanel({
     setPendingExecuteNodeIds(null);
     autoRunCompletedRef.current = true;
     setExecutionIndex(0);
+    plannedToActualNodeIdRef.current.clear();
   }, [describeOperation, onApplyEdits, pendingExecuteNodeIds, pendingOperations, updateSessionMessages]);
 
   const orchestratorDeps = useMemo<OrchestratorDeps>(
@@ -1321,11 +1354,15 @@ export function FlowyAgentPanel({
       if (!pendingOperations || !onApplyEdits) return;
       if (index < 0 || index >= pendingOperations.length) return;
 
-      const op = pendingOperations[index];
+      const originalOp = pendingOperations[index];
+      const op = remapOperationNodeIds(originalOp, plannedToActualNodeIdRef.current);
       setIsExecutingStep(true);
 
       try {
-        await executeOperationWithMouse(op, orchestratorDeps);
+        const actualNodeId = await executeOperationWithMouse(op, orchestratorDeps);
+        if (originalOp.type === "addNode" && originalOp.nodeId && actualNodeId) {
+          plannedToActualNodeIdRef.current.set(originalOp.nodeId, actualNodeId);
+        }
         setExecutionIndex(index + 1);
       } finally {
         setIsExecutingStep(false);
@@ -1366,6 +1403,7 @@ export function FlowyAgentPanel({
     }
     stopAutoRun();
     autoApplyStartedForOpsRef.current = null;
+    plannedToActualNodeIdRef.current.clear();
     setPendingOperations(null);
     setPendingExplanation(null);
     setPendingExecuteNodeIds(null);
@@ -1414,6 +1452,7 @@ export function FlowyAgentPanel({
   useEffect(() => {
     if (!pendingOperations) {
       autoApplyStartedForOpsRef.current = null;
+      plannedToActualNodeIdRef.current.clear();
     }
   }, [pendingOperations]);
 
@@ -1455,6 +1494,50 @@ export function FlowyAgentPanel({
     setActiveDecomposition(null);
   }, [createSession]);
 
+  const handleRenameSession = useCallback(
+    (sessionId: string) => {
+      const current = sessions.find((s) => s.id === sessionId);
+      if (!current) return;
+      const nextTitle = window.prompt("Rename chat", current.title);
+      if (nextTitle == null) return;
+      const trimmed = nextTitle.trim();
+      if (!trimmed) return;
+      setSessions((prev) =>
+        prev.map((s) => (s.id === sessionId ? { ...s, title: trimmed.slice(0, 64) } : s))
+      );
+    },
+    [sessions]
+  );
+
+  const handleDeleteSession = useCallback(
+    (sessionId: string) => {
+      const target = sessions.find((s) => s.id === sessionId);
+      if (!target) return;
+      const ok = window.confirm(`Delete chat "${target.title}"?`);
+      if (!ok) return;
+
+      stopAutoRun();
+      setPendingOperations(null);
+      setPendingExplanation(null);
+      setPendingExecuteNodeIds(null);
+      resetExecution();
+      setErrorMessage(null);
+      setSessions((prev) => {
+        const remaining = prev.filter((s) => s.id !== sessionId);
+        if (remaining.length === 0) {
+          const fresh = createSession();
+          setActiveSessionId(fresh.id);
+          return [fresh];
+        }
+        if (sessionId === activeSessionId) {
+          setActiveSessionId(remaining[0].id);
+        }
+        return remaining;
+      });
+    },
+    [activeSessionId, createSession, resetExecution, sessions, stopAutoRun]
+  );
+
   const modeSliderIndex = flowyAgentMode === "assist" ? 0 : flowyAgentMode === "auto" ? 1 : 2;
   const styleMemorySummary = useMemo(() => {
     if (!styleMemory) {
@@ -1485,6 +1568,25 @@ export function FlowyAgentPanel({
       topPatterns: top(styleMemory.commonPatterns, 3),
     };
   }, [styleMemory]);
+  const canvasStateMemorySummary = useMemo(() => {
+    const prev = canvasStateMemory?.previous as any;
+    const curr = canvasStateMemory?.current as any;
+    const countNodes = (x: any) => (Array.isArray(x?.nodes) ? x.nodes.length : 0);
+    const countEdges = (x: any) => (Array.isArray(x?.edges) ? x.edges.length : 0);
+    const countGroups = (x: any) => {
+      const g = x?.groups;
+      return g && typeof g === "object" ? Object.keys(g).length : 0;
+    };
+    return {
+      updatedAt: canvasStateMemory?.updatedAt ?? null,
+      previousNodes: countNodes(prev),
+      previousEdges: countEdges(prev),
+      previousGroups: countGroups(prev),
+      currentNodes: countNodes(curr),
+      currentEdges: countEdges(curr),
+      currentGroups: countGroups(curr),
+    };
+  }, [canvasStateMemory]);
   const memoryInspectorText = useMemo(() => {
     return [
       `projectScope: ${sessionScopeId}`,
@@ -1494,10 +1596,13 @@ export function FlowyAgentPanel({
       `activeSessionId: ${activeSessionId}`,
       `customInstructionsChars: ${customInstructions.trim().length}`,
       `styleMemory: models=${styleMemorySummary.models}, styles=${styleMemorySummary.styles}, ratios=${styleMemorySummary.ratios}, patterns=${styleMemorySummary.patterns}`,
+      `canvasStateMemory: updatedAt=${canvasStateMemorySummary.updatedAt ?? 0}, previous(nodes=${canvasStateMemorySummary.previousNodes}, edges=${canvasStateMemorySummary.previousEdges}, groups=${canvasStateMemorySummary.previousGroups}), current(nodes=${canvasStateMemorySummary.currentNodes}, edges=${canvasStateMemorySummary.currentEdges}, groups=${canvasStateMemorySummary.currentGroups})`,
       styleMemorySummary.topModels.length ? `topModels: ${styleMemorySummary.topModels.join(" | ")}` : "",
       styleMemorySummary.topStyles.length ? `topStyles: ${styleMemorySummary.topStyles.join(" | ")}` : "",
       styleMemorySummary.topRatios.length ? `topAspectRatios: ${styleMemorySummary.topRatios.join(" | ")}` : "",
       styleMemorySummary.topPatterns.length ? `topPatterns: ${styleMemorySummary.topPatterns.join(" | ")}` : "",
+      canvasStateMemory?.previous ? `canvasPrevious: ${JSON.stringify(canvasStateMemory.previous)}` : "",
+      canvasStateMemory?.current ? `canvasCurrent: ${JSON.stringify(canvasStateMemory.current)}` : "",
     ]
       .filter(Boolean)
       .join("\n");
@@ -1509,6 +1614,8 @@ export function FlowyAgentPanel({
     activeSessionId,
     customInstructions,
     styleMemorySummary,
+    canvasStateMemory,
+    canvasStateMemorySummary,
   ]);
   const chatInputPlaceholder =
     flowyAgentMode === "plan"
@@ -1570,20 +1677,40 @@ export function FlowyAgentPanel({
                 <div className="px-3 py-2 text-xs text-neutral-500">No chats yet</div>
               ) : (
                 sortedSessions.map((s) => (
-                  <button
+                  <div
                     key={s.id}
-                    type="button"
                     role="option"
                     aria-selected={s.id === activeSessionId}
-                    onClick={() => switchToSession(s.id)}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-sm transition-colors ${
-                      s.id === activeSessionId
-                        ? "bg-white/10 text-white"
-                        : "text-neutral-300 hover:bg-white/10 hover:text-white"
+                    className={`flex w-full items-center gap-2 px-2 py-1 text-sm ${
+                      s.id === activeSessionId ? "bg-white/10 text-white" : "text-neutral-300 hover:bg-white/10"
                     }`}
                   >
-                    <span className="truncate">{s.title}</span>
-                  </button>
+                    <button
+                      type="button"
+                      onClick={() => switchToSession(s.id)}
+                      className="min-w-0 flex-1 truncate rounded px-1 py-1 text-left hover:text-white"
+                    >
+                      {s.title}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRenameSession(s.id)}
+                      className="rounded px-1.5 py-0.5 text-[10px] text-neutral-400 hover:bg-white/10 hover:text-neutral-200"
+                      title="Rename chat"
+                      aria-label={`Rename ${s.title}`}
+                    >
+                      Rename
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteSession(s.id)}
+                      className="rounded px-1.5 py-0.5 text-[10px] text-rose-300/70 hover:bg-rose-500/20 hover:text-rose-200"
+                      title="Delete chat"
+                      aria-label={`Delete ${s.title}`}
+                    >
+                      Delete
+                    </button>
+                  </div>
                 ))
               )}
             </div>
@@ -2299,6 +2426,39 @@ export function FlowyAgentPanel({
                   <div>
                     Styles: <span className="text-neutral-300">{styleMemorySummary.styles}</span>
                   </div>
+                </div>
+                <div className="mb-2 rounded-lg border border-white/10 bg-black/20 p-2 text-[11px] text-neutral-400">
+                  <div className="mb-1 text-neutral-300">Canvas state memory</div>
+                  <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                    <div>
+                      Previous:{" "}
+                      <span className="text-neutral-300">
+                        {canvasStateMemorySummary.previousNodes}n / {canvasStateMemorySummary.previousEdges}e / {canvasStateMemorySummary.previousGroups}g
+                      </span>
+                    </div>
+                    <div>
+                      Current:{" "}
+                      <span className="text-neutral-300">
+                        {canvasStateMemorySummary.currentNodes}n / {canvasStateMemorySummary.currentEdges}e / {canvasStateMemorySummary.currentGroups}g
+                      </span>
+                    </div>
+                    <div className="col-span-2">
+                      Updated:{" "}
+                      <span className="text-neutral-300">
+                        {canvasStateMemorySummary.updatedAt
+                          ? new Date(canvasStateMemorySummary.updatedAt).toLocaleString()
+                          : "not yet"}
+                      </span>
+                    </div>
+                  </div>
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-[11px] text-neutral-400 hover:text-neutral-200">
+                      Show canvas previous/current JSON
+                    </summary>
+                    <pre className="mt-2 max-h-40 overflow-auto rounded-lg border border-white/10 bg-black/30 p-2 text-[10px] leading-relaxed text-neutral-300 whitespace-pre-wrap">
+{JSON.stringify(canvasStateMemory ?? {}, null, 2)}
+                    </pre>
+                  </details>
                 </div>
                 <details className="group">
                   <summary className="cursor-pointer text-[11px] text-neutral-400 hover:text-neutral-200">
