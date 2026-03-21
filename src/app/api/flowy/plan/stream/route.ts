@@ -11,7 +11,7 @@ type PlanRequest = {
   selectedNodeIds?: string[];
   chatHistory?: Array<{ role: "user" | "assistant"; text: string }>;
   attachments?: Array<{ id: string; name?: string; mimeType?: string; dataUrl: string }>;
-  agentMode?: "plan" | "assist" | "auto";
+  agentMode?: "plan" | "assist";
   projectId?: string;
   provider?: string;
   model?: string;

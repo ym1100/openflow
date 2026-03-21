@@ -21,8 +21,8 @@ type PlanRequest = {
   }>;
   modelCatalog?: Record<string, Array<{ provider: string; modelId: string; displayName: string }>>;
   canvasStateMemory?: { previous?: unknown; current?: unknown; updatedAt?: number };
-  /** `plan` = advisory only (no canvas ops). `assist` / `auto` = canvas planner. */
-  agentMode?: "plan" | "assist" | "auto";
+  /** `plan` = advisory only (no canvas ops). `assist` = canvas planner. */
+  agentMode?: "plan" | "assist";
   projectId?: string;
   provider?: string;
   model?: string;

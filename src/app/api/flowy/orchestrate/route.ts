@@ -17,7 +17,7 @@ type PlanRequest = {
   attachments?: Array<{ id: string; name?: string; mimeType?: string; dataUrl: string }>;
   modelCatalog?: Record<string, Array<{ provider: string; modelId: string; displayName: string }>>;
   canvasStateMemory?: { previous?: unknown; current?: unknown; updatedAt?: number };
-  agentMode?: "plan" | "assist" | "auto";
+  agentMode?: "plan" | "assist";
   projectId?: string;
   stageIndex?: number;
   decompositionStages?: Array<Record<string, unknown>>;

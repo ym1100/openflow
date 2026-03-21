@@ -12,7 +12,7 @@ export const FLOWY_CANVAS_STATE_MEMORY_KEY = "openflows-flowy-canvas-state-memor
 
 export const FLOWY_MAX_STORED_SESSIONS = 50;
 
-export type FlowyAgentMode = "plan" | "assist" | "auto";
+export type FlowyAgentMode = "plan" | "assist";
 
 export type StoredAppliedPlan = {
   operations: string[];
@@ -153,7 +153,7 @@ export function loadFlowyAgentMode(): FlowyAgentMode {
   if (typeof window === "undefined") return "assist";
   try {
     const v = localStorage.getItem(FLOWY_AGENT_MODE_KEY);
-    if (v === "plan" || v === "assist" || v === "auto") return v;
+    if (v === "plan" || v === "assist") return v;
   } catch {
     /* ignore */
   }

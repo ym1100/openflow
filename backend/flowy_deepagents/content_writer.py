@@ -1388,7 +1388,7 @@ def main() -> None:
             max_chars=hist_max_chars,
         )
         agent_mode = str(payload.get("agentMode") or "assist").strip().lower()
-        if agent_mode not in {"plan", "assist", "auto"}:
+        if agent_mode not in {"plan", "assist"}:
             agent_mode = "assist"
         run_quality_check = bool(payload.get("runQualityCheck"))
 
@@ -1459,7 +1459,7 @@ def main() -> None:
             "true",
             "yes",
         }
-        # Router should run for assist/auto too, so normal conversation remains possible
+        # Router should run for assist too, so normal conversation remains possible
         # without forcing canvas edits on every message.
         if not skip_router:
             _emit_progress("routing", "classifying intent")

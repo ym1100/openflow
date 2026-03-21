@@ -535,17 +535,6 @@ export function FlowyAgentPanel({
   const storeUpdateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const setNavigationTarget = useWorkflowStore((s) => s.setNavigationTarget);
   const sessionScopeId = workflowId || "global";
-  const applyServerWorkflowState = useCallback((wf: any) => {
-    if (!wf || !Array.isArray(wf.nodes) || !Array.isArray(wf.edges)) return;
-    useWorkflowStore.setState((state) => ({
-      ...state,
-      nodes: wf.nodes,
-      edges: wf.edges,
-      groups: wf.groups ?? {},
-      hasUnsavedChanges: true,
-    }));
-  }, []);
-
   const flowToScreenPosition = useCallback(
     (pos: { x: number; y: number }) => {
       const vp = getViewport();
@@ -574,11 +563,6 @@ export function FlowyAgentPanel({
   const [activeSessionId, setActiveSessionId] = useState<string>(() => seed.id);
   const activeSessionIdRef = useRef(activeSessionId);
   activeSessionIdRef.current = activeSessionId;
-
-  const autoContinueMaxSteps = useMemo(() => {
-    const n = Number(process.env.NEXT_PUBLIC_FLOWY_AUTO_CONTINUE_MAX_STEPS);
-    return Number.isFinite(n) && n > 0 ? Math.min(20, Math.floor(n)) : 3;
-  }, []);
 
   const updateSessionMessages = useCallback((sessionId: string, updater: (prev: ChatMsg[]) => ChatMsg[]) => {
     setSessions((prev) =>
@@ -980,41 +964,7 @@ export function FlowyAgentPanel({
           debugLastText?: string;
         }) | null = null;
 
-        if (agentModeAtStart === "auto") {
-          const res = await fetch("/api/flowy/orchestrate", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            signal: abortController.signal,
-            body: JSON.stringify({
-              ...body,
-              maxIterations: autoContinueMaxSteps,
-              autoApply: true,
-              idempotencyKey: `auto-${Date.now()}`,
-            }),
-          });
-          if (!res.ok) {
-            const err = await res.json().catch(() => null);
-            throw new Error(err?.error || `Orchestration failed (${res.status})`);
-          }
-          const orch = await res.json();
-          if (!orch?.ok) {
-            throw new Error(orch?.error || "Orchestration failed");
-          }
-          if (orch.finalWorkflowState) {
-            applyServerWorkflowState(orch.finalWorkflowState);
-          }
-          const lastStep = Array.isArray(orch.steps) && orch.steps.length > 0 ? orch.steps[orch.steps.length - 1] : null;
-          data = {
-            ok: true,
-            mode: "chat",
-            assistantText:
-              typeof lastStep?.assistantText === "string" && lastStep.assistantText.trim()
-                ? lastStep.assistantText
-                : `Completed ${orch.iterations ?? 1} backend orchestration iteration(s).`,
-            operations: [],
-          } as any;
-          setPlannerProgress("Backend orchestration complete.");
-        } else if (useStreaming) {
+        if (useStreaming) {
           const streamRes = await fetch("/api/flowy/plan/stream", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -1137,7 +1087,7 @@ export function FlowyAgentPanel({
         setPlannerStageEvent(null);
       }
     },
-    [contextNodeIds, customInstructions, imageAttachments, isPlanning, scrollToBottom, stateForRequest, updateSessionMessages, autoContinueMaxSteps, applyServerWorkflowState, canvasStateMemory]
+    [contextNodeIds, customInstructions, imageAttachments, isPlanning, scrollToBottom, stateForRequest, updateSessionMessages, canvasStateMemory]
   );
 
   const handlePlan = useCallback(async () => {
@@ -1218,9 +1168,7 @@ export function FlowyAgentPanel({
   }, []);
 
   useEffect(() => {
-    if (flowyAgentMode === "auto") {
-      setApplyMode("auto");
-    } else if (flowyAgentMode === "assist") {
+    if (flowyAgentMode === "assist") {
       // Assist now auto-applies canvas edits; only run execution needs approval.
       setApplyMode("auto");
     } else {
@@ -1552,7 +1500,7 @@ export function FlowyAgentPanel({
     [activeSessionId, createSession, resetExecution, sessions, stopAutoRun]
   );
 
-  const modeSliderIndex = flowyAgentMode === "assist" ? 0 : flowyAgentMode === "auto" ? 1 : 2;
+  const modeSliderIndex = flowyAgentMode === "assist" ? 0 : 1;
   const styleMemorySummary = useMemo(() => {
     if (!styleMemory) {
       return {
@@ -1634,9 +1582,7 @@ export function FlowyAgentPanel({
   const chatInputPlaceholder =
     flowyAgentMode === "plan"
       ? "Brainstorm workflows, prompts, and tradeoffs. Use @ to mention nodes."
-      : flowyAgentMode === "auto"
-        ? "Describe the outcome — Flowy can build and run. Use @ to mention nodes."
-        : "Flowy auto-builds the canvas; approve before running nodes. Use @ to mention nodes.";
+      : "Flowy auto-builds the canvas; approve before running nodes. Use @ to mention nodes.";
 
   if (!isOpen) return null;
 
@@ -1794,11 +1740,6 @@ export function FlowyAgentPanel({
                 <p className="text-xs mt-2">
                   Example: “Give me a 3-node workflow for a product ad, with prompts to paste.”
                 </p>
-              </>
-            ) : flowyAgentMode === "auto" ? (
-              <>
-                <p className="text-neutral-400">Auto mode — Flowy can add nodes, connect, and run.</p>
-                <p className="text-xs mt-2">Example: “Turn this prompt into a video workflow with 3 variations.”</p>
               </>
             ) : (
               <>
@@ -2222,17 +2163,17 @@ export function FlowyAgentPanel({
               </div>
               <div className="flex w-full items-center gap-1">
                 <div
-                  className="relative grid w-[min(100%,13.75rem)] shrink-0 grid-cols-3 rounded-xl bg-[#313131] p-1"
+                  className="relative grid w-[min(100%,10rem)] shrink-0 grid-cols-2 rounded-xl bg-[#313131] p-1"
                   role="radiogroup"
                   aria-label="Chat mode"
                 >
                   <div className="pointer-events-none absolute inset-1" aria-hidden>
                     <div
-                      className="h-full w-1/3 rounded-lg bg-white/10 transition-transform duration-200 ease-out"
+                      className="h-full w-1/2 rounded-lg bg-white/10 transition-transform duration-200 ease-out"
                       style={{ transform: `translateX(${modeSliderIndex * 100}%)` }}
                     />
                   </div>
-                  {(["assist", "auto", "plan"] as const).map((m) => (
+                  {(["assist", "plan"] as const).map((m) => (
                     <button
                       key={m}
                       type="button"
@@ -2244,18 +2185,10 @@ export function FlowyAgentPanel({
                         flowyAgentMode === m ? "text-white" : "text-neutral-500 hover:text-neutral-300"
                       }`}
                     >
-                      {m === "assist" ? "Assist" : m === "auto" ? "Auto" : "Chat"}
+                      {m === "assist" ? "Assist" : "Chat"}
                     </button>
                   ))}
                 </div>
-                {flowyAgentMode === "auto" && (
-                  <span
-                    className="ml-1 inline-flex shrink-0 items-center rounded-lg border border-emerald-500/40 bg-emerald-500/15 px-2 py-0.5 text-[10px] leading-none text-emerald-300"
-                    title="Auto mode orchestration runs on backend loop"
-                  >
-                    Backend Loop
-                  </span>
-                )}
                 <div className="min-w-0 flex-1" />
                 <div className="flex shrink-0 items-center gap-0.5">
                   <input
@@ -2320,7 +2253,7 @@ export function FlowyAgentPanel({
         >
           <span className="text-neutral-500">Flowy is experimental.</span>{" "}
           <span className="text-neutral-600">
-            Chat = advice only · Assist = auto-build + approve run · Auto = build &amp; run
+            Chat = advice only · Assist = auto-build + approve run
           </span>
         </div>
       </div>
