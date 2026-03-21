@@ -362,6 +362,19 @@ def _coerce_model_catalog(raw: Any) -> Dict[str, List[Dict[str, str]]]:
     return out
 
 
+def _coerce_canvas_state_memory(raw: Any) -> Dict[str, Any]:
+    if not isinstance(raw, dict):
+        return {}
+    out: Dict[str, Any] = {}
+    if "previous" in raw:
+        out["previous"] = raw.get("previous")
+    if "current" in raw:
+        out["current"] = raw.get("current")
+    if isinstance(raw.get("updatedAt"), (int, float)):
+        out["updatedAt"] = int(raw["updatedAt"])
+    return out
+
+
 def _pick_best_model_alias(raw_value: str, candidates: List[Dict[str, str]]) -> Optional[Dict[str, str]]:
     query = (raw_value or "").strip().lower()
     if not query or not candidates:
@@ -854,6 +867,7 @@ def _build_user_prompt(
     selected_node_ids: List[str],
     attachments: Optional[List[Dict[str, str]]] = None,
     model_catalog: Optional[Dict[str, List[Dict[str, str]]]] = None,
+    canvas_state_memory: Optional[Dict[str, Any]] = None,
     *,
     closing_instruction: str,
 ) -> str:
@@ -884,6 +898,7 @@ def _build_user_prompt(
 
     attachments = attachments or []
     model_catalog = model_catalog or {}
+    canvas_state_memory = canvas_state_memory or {}
     attachments_brief = (
         "Uploaded images (JSON):\n"
         + json.dumps(
@@ -907,6 +922,13 @@ def _build_user_prompt(
             + json.dumps(model_catalog, ensure_ascii=False, indent=2)
             + "\n\n"
             if model_catalog
+            else ""
+        )
+        + (
+            "Canvas state memory (previous -> current). Use this to reason about what changed recently:\n"
+            + json.dumps(canvas_state_memory, ensure_ascii=False, indent=2)
+            + "\n\n"
+            if canvas_state_memory
             else ""
         )
         + "Execution digest (focused nodes): status, errors, prompt previews, hasOutput* flags — no media payloads.\n"
@@ -933,6 +955,7 @@ def _run_plan_advisor_only(
     selected_node_ids: List[str],
     attachments: Optional[List[Dict[str, str]]] = None,
     model_catalog: Optional[Dict[str, List[Dict[str, str]]]] = None,
+    canvas_state_memory: Optional[Dict[str, Any]] = None,
     chat_history: Optional[List[Dict[str, str]]] = None,
 ) -> str:
     advisor = _read_text_file("PLAN_ADVISOR.md").strip()
@@ -945,6 +968,7 @@ def _run_plan_advisor_only(
         selected_node_ids,
         attachments=attachments,
         model_catalog=model_catalog,
+        canvas_state_memory=canvas_state_memory,
         closing_instruction=CLOSE_PLAN_ADVISOR,
     )
     hist = chat_history or []
@@ -984,6 +1008,7 @@ def main() -> None:
         selected_node_ids = payload.get("selectedNodeIds") or []
         attachments = _coerce_image_attachments(payload.get("attachments"))
         model_catalog = _coerce_model_catalog(payload.get("modelCatalog"))
+        canvas_state_memory = _coerce_canvas_state_memory(payload.get("canvasStateMemory"))
         try:
             hist_max_turns = int(os.environ.get("FLOWY_CHAT_HISTORY_MAX_TURNS", "14"))
         except ValueError:
@@ -1046,7 +1071,7 @@ def main() -> None:
         if agent_mode == "plan":
             _emit_progress("advisor", "running plan advisor")
             text = _run_plan_advisor_only(
-                model, message, workflow_state, selected_node_ids, attachments, model_catalog=model_catalog, chat_history=chat_history
+                model, message, workflow_state, selected_node_ids, attachments, model_catalog=model_catalog, canvas_state_memory=canvas_state_memory, chat_history=chat_history
             )
             sys.stdout.write(
                 json.dumps(
@@ -1081,7 +1106,7 @@ def main() -> None:
                 # route through multimodal advisor instead of a plain router reply.
                 if attachments and _looks_like_visual_assessment_request(message):
                     text = _run_plan_advisor_only(
-                        model, message, workflow_state, selected_node_ids, attachments, model_catalog=model_catalog, chat_history=chat_history
+                        model, message, workflow_state, selected_node_ids, attachments, model_catalog=model_catalog, canvas_state_memory=canvas_state_memory, chat_history=chat_history
                     )
                     sys.stdout.write(
                         json.dumps(
@@ -1179,6 +1204,7 @@ def main() -> None:
                 selected_node_ids,
                 attachments=attachments,
                 model_catalog=model_catalog,
+                canvas_state_memory=canvas_state_memory,
                 closing_instruction=CLOSE_CANVAS_PLAN,
             )
             if attempt > 0 and last_errors:

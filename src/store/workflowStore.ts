@@ -2155,7 +2155,7 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       ) {
         await state.saveToFile();
       }
-    }, 90 * 1000); // 90 seconds
+    }, 1000); // near-immediate save for file-based projects
   },
 
   cleanupAutoSave: () => {

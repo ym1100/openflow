@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { updateProject } from "@/lib/local-db";
 
@@ -33,37 +33,19 @@ export function ProjectSync({ projectId }: ProjectSyncProps) {
   const groups = useWorkflowStore((state) => state.groups);
   const edgeStyle = useWorkflowStore((state) => state.edgeStyle);
   const workflowName = useWorkflowStore((state) => state.workflowName);
-  const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
   useEffect(() => {
-    const save = () => {
-      const workflow = buildWorkflow(
-        projectId,
-        nodes,
-        edges,
-        groups,
-        edgeStyle,
-        workflowName
-      );
-      updateProject(projectId, {
-        name: workflow.name,
-        content: workflow,
-      }).catch((err) => console.error("Failed to save project:", err));
-    };
-
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
-
-    saveTimeoutRef.current = setTimeout(save, 1000);
-
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-        saveTimeoutRef.current = null;
-      }
-      save();
-    };
+    const workflow = buildWorkflow(
+      projectId,
+      nodes,
+      edges,
+      groups,
+      edgeStyle,
+      workflowName
+    );
+    updateProject(projectId, {
+      name: workflow.name,
+      content: workflow,
+    }).catch((err) => console.error("Failed to save project:", err));
   }, [projectId, nodes, edges, groups, edgeStyle, workflowName]);
 
   return null;

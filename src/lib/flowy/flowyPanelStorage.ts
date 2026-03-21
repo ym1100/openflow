@@ -8,6 +8,7 @@ export const FLOWY_CUSTOM_INSTRUCTIONS_KEY = "openflows-flowy-custom-instruction
 export const FLOWY_DOCKED_KEY = "openflows-flowy-docked";
 export const FLOWY_AGENT_MODE_KEY = "openflows-flowy-agent-mode";
 export const FLOWY_STYLE_MEMORY_KEY = "openflows-flowy-style-memory";
+export const FLOWY_CANVAS_STATE_MEMORY_KEY = "openflows-flowy-canvas-state-memory";
 
 export const FLOWY_MAX_STORED_SESSIONS = 50;
 
@@ -182,6 +183,12 @@ export type StyleMemory = {
   commonPatterns: StyleMemoryEntry[];
 };
 
+export type CanvasStateMemory = {
+  previous: unknown | null;
+  current: unknown | null;
+  updatedAt: number;
+};
+
 const EMPTY_STYLE_MEMORY: StyleMemory = {
   preferredModels: [],
   preferredStyles: [],
@@ -218,6 +225,33 @@ export function saveStyleMemory(memory: StyleMemory, scopeId?: string | null): v
       commonPatterns: memory.commonPatterns.slice(0, 10),
     };
     localStorage.setItem(_scopedKey(FLOWY_STYLE_MEMORY_KEY, scopeId), JSON.stringify(trimmed));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function loadCanvasStateMemory(scopeId?: string | null): CanvasStateMemory | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const scopedKey = _scopedKey(FLOWY_CANVAS_STATE_MEMORY_KEY, scopeId);
+    const raw = localStorage.getItem(scopedKey) ?? (scopeId ? localStorage.getItem(FLOWY_CANVAS_STATE_MEMORY_KEY) : null);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object") return null;
+    return {
+      previous: (parsed as any).previous ?? null,
+      current: (parsed as any).current ?? null,
+      updatedAt: typeof (parsed as any).updatedAt === "number" ? (parsed as any).updatedAt : Date.now(),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function saveCanvasStateMemory(memory: CanvasStateMemory, scopeId?: string | null): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(_scopedKey(FLOWY_CANVAS_STATE_MEMORY_KEY, scopeId), JSON.stringify(memory));
   } catch {
     /* ignore */
   }

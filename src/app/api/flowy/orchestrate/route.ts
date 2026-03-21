@@ -15,6 +15,8 @@ type PlanRequest = {
   selectedNodeIds?: string[];
   chatHistory?: Array<{ role: "user" | "assistant"; text: string }>;
   attachments?: Array<{ id: string; name?: string; mimeType?: string; dataUrl: string }>;
+  modelCatalog?: Record<string, Array<{ provider: string; modelId: string; displayName: string }>>;
+  canvasStateMemory?: { previous?: unknown; current?: unknown; updatedAt?: number };
   agentMode?: "plan" | "assist" | "auto";
   projectId?: string;
   stageIndex?: number;

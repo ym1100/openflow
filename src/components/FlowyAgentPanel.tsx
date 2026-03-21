@@ -27,11 +27,13 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import { capFlowyChatHistory } from "@/lib/flowy/capFlowyChatHistory";
 import {
   createEmptyFlowySession,
+  loadCanvasStateMemory,
   loadCustomInstructions,
   loadDockedPreference,
   loadFlowyAgentMode,
   loadFlowyPanelSessions,
   loadStyleMemory,
+  saveCanvasStateMemory,
   saveCustomInstructions,
   saveDockedPreference,
   saveFlowyAgentMode,
@@ -39,6 +41,7 @@ import {
   saveStyleMemory,
   styleMemoryToPromptContext,
   updateStyleMemoryEntry,
+  type CanvasStateMemory,
   type FlowyAgentMode,
   type StoredChatSession,
   type StyleMemory,
@@ -336,6 +339,42 @@ function buildModelCatalogFromNodeDefaults(defaults: Record<string, any>): Recor
   };
 }
 
+function sanitizeCanvasStateForMemory(state: WorkflowState | undefined): unknown {
+  if (!state) return null;
+  const compact = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      if (value.startsWith("data:image/")) return "[data:image]";
+      if (value.startsWith("data:audio/")) return "[data:audio]";
+      if (value.startsWith("data:video/")) return "[data:video]";
+      return value.length > 240 ? `${value.slice(0, 240)}...` : value;
+    }
+    if (Array.isArray(value)) return value.slice(0, 40).map(compact);
+    if (value && typeof value === "object") {
+      const out: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(value as Record<string, unknown>)) out[k] = compact(v);
+      return out;
+    }
+    return value;
+  };
+  return {
+    nodes: (state.nodes ?? []).map((n) => ({
+      id: n.id,
+      type: n.type,
+      position: n.position,
+      groupId: n.groupId ?? null,
+      data: compact(n.data),
+    })),
+    edges: (state.edges ?? []).map((e) => ({
+      id: e.id,
+      source: e.source,
+      target: e.target,
+      sourceHandle: e.sourceHandle ?? null,
+      targetHandle: e.targetHandle ?? null,
+    })),
+    groups: state.groups ?? {},
+  };
+}
+
 /** Markdown in Flowy chat (user + assistant): bold, lists, code, links — no raw `**`. */
 const FLOWY_CHAT_MD_COMPONENTS: Components = {
   p: ({ children }) => (
@@ -575,6 +614,8 @@ export function FlowyAgentPanel({
   const [styleMemory, setStyleMemory] = useState<StyleMemory | null>(null);
   const styleMemoryRef = useRef<StyleMemory | null>(null);
   styleMemoryRef.current = styleMemory;
+  const [canvasStateMemory, setCanvasStateMemory] = useState<CanvasStateMemory | null>(null);
+  const lastCanvasSnapshotRef = useRef<string>("");
 
   // Hydrate sessions from localStorage for the current workflow scope.
   useEffect(() => {
@@ -589,6 +630,8 @@ export function FlowyAgentPanel({
     }
     setCustomInstructions(loadCustomInstructions(sessionScopeId));
     setStyleMemory(loadStyleMemory(sessionScopeId));
+    setCanvasStateMemory(loadCanvasStateMemory(sessionScopeId));
+    lastCanvasSnapshotRef.current = "";
     setStorageReady(true);
   }, [sessionScopeId]);
 
@@ -614,6 +657,20 @@ export function FlowyAgentPanel({
     if (!styleMemory) return;
     saveStyleMemory(styleMemory, sessionScopeId);
   }, [sessionScopeId, styleMemory]);
+
+  useEffect(() => {
+    const snapshot = sanitizeCanvasStateForMemory(workflowState);
+    const nextJson = JSON.stringify(snapshot ?? null);
+    if (!nextJson || nextJson === lastCanvasSnapshotRef.current) return;
+    const memory: CanvasStateMemory = {
+      previous: lastCanvasSnapshotRef.current ? JSON.parse(lastCanvasSnapshotRef.current) : null,
+      current: snapshot,
+      updatedAt: Date.now(),
+    };
+    lastCanvasSnapshotRef.current = nextJson;
+    setCanvasStateMemory(memory);
+    saveCanvasStateMemory(memory, sessionScopeId);
+  }, [workflowState, sessionScopeId]);
 
   useEffect(() => {
     saveDockedPreference(isDocked);
@@ -849,6 +906,7 @@ export function FlowyAgentPanel({
           agentMode: agentModeAtStart,
           attachments: dedupedAttachments,
           modelCatalog,
+          canvasStateMemory,
         };
         if (opts?.stageIndex !== undefined) body.stageIndex = opts.stageIndex;
         if (opts?.decompositionStages) body.decompositionStages = opts.decompositionStages;
@@ -1036,7 +1094,7 @@ export function FlowyAgentPanel({
         setPlannerProgress(null);
       }
     },
-    [contextNodeIds, customInstructions, imageAttachments, isPlanning, scrollToBottom, stateForRequest, updateSessionMessages, autoContinueMaxSteps, applyServerWorkflowState]
+    [contextNodeIds, customInstructions, imageAttachments, isPlanning, scrollToBottom, stateForRequest, updateSessionMessages, autoContinueMaxSteps, applyServerWorkflowState, canvasStateMemory]
   );
 
   const handlePlan = useCallback(async () => {
