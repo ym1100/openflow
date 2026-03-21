@@ -1267,6 +1267,7 @@ export function FlowyAgentPanel({
   }, [createSession]);
 
   const modeSliderIndex = flowyAgentMode === "assist" ? 0 : flowyAgentMode === "auto" ? 1 : 2;
+  const backendAutoLoopEnabled = process.env.NEXT_PUBLIC_FLOWY_BACKEND_AUTO_LOOP === "1";
   const chatInputPlaceholder =
     flowyAgentMode === "plan"
       ? "Brainstorm workflows, prompts, and tradeoffs. Use @ to mention nodes."
@@ -1919,6 +1920,22 @@ export function FlowyAgentPanel({
                     </button>
                   ))}
                 </div>
+                {flowyAgentMode === "auto" && (
+                  <span
+                    className={`ml-1 inline-flex shrink-0 items-center rounded-lg border px-2 py-0.5 text-[10px] leading-none ${
+                      backendAutoLoopEnabled
+                        ? "border-emerald-500/40 bg-emerald-500/15 text-emerald-300"
+                        : "border-white/10 bg-white/[0.04] text-neutral-400"
+                    }`}
+                    title={
+                      backendAutoLoopEnabled
+                        ? "Auto mode orchestration runs on backend loop"
+                        : "Auto mode orchestration runs in frontend panel loop"
+                    }
+                  >
+                    {backendAutoLoopEnabled ? "Backend Loop Active" : "Frontend Loop"}
+                  </span>
+                )}
                 <div className="min-w-0 flex-1" />
                 <div className="flex shrink-0 items-center gap-0.5">
                   <input
