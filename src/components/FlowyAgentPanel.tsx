@@ -705,7 +705,7 @@ export function FlowyAgentPanel({
   const [clickRipple, setClickRipple] = useState<{ x: number; y: number; id: number } | null>(null);
   const cursorPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isExecutingStep, setIsExecutingStep] = useState(false);
-  const [cursorActionLabel, setCursorActionLabel] = useState<string>("agent");
+  const [cursorActionLabel, setCursorActionLabel] = useState<string>("Ready");
   const [plannerProgress, setPlannerProgress] = useState<string | null>(null);
   const [plannerStageEvent, setPlannerStageEvent] = useState<PlannerStageEvent | null>(null);
   const autoRunIdRef = useRef(0);
@@ -1204,6 +1204,8 @@ export function FlowyAgentPanel({
             autoRunCompletedRef.current = true;
             autoApplyStartedForOpsRef.current = null;
             setIsExecutingStep(false);
+            setClickRipple(null);
+            setCursorActionLabel("Ready");
             pushAssistant(data.assistantText || "Stopped current automation.");
             setInput("");
             return;
@@ -1521,6 +1523,39 @@ export function FlowyAgentPanel({
     }
   }, []);
 
+  /** Shown next to the assist pointer: thinking → planning → canvas actions → idle. */
+  const assistCursorStatusText = useMemo(() => {
+    if (isExecutingStep) {
+      const t = cursorActionLabel.trim();
+      return t.length > 0 ? t : "Working…";
+    }
+    if (isPlanning) {
+      const detail = plannerStageEvent?.detail?.trim() || plannerProgress?.trim();
+      if (detail) return detail.length > 120 ? `${detail.slice(0, 117)}…` : detail;
+      const title = plannerStageEvent?.stageTitle?.trim();
+      if (title) return title;
+      return "Thinking…";
+    }
+    if (isRunning) return "Running workflow…";
+    if (
+      pendingOperations &&
+      pendingOperations.length > 0 &&
+      executionIndex < pendingOperations.length
+    ) {
+      return `Plan ready · step ${executionIndex + 1}/${pendingOperations.length}`;
+    }
+    return "Ready";
+  }, [
+    cursorActionLabel,
+    executionIndex,
+    isExecutingStep,
+    isPlanning,
+    isRunning,
+    pendingOperations,
+    plannerProgress,
+    plannerStageEvent,
+  ]);
+
   const describeOperation = useCallback(
     (op: EditOperation): string => {
     switch (op.type) {
@@ -1564,22 +1599,30 @@ export function FlowyAgentPanel({
     if (pendingOperations == null || !onApplyEdits) return;
     const uiBatch = pendingUiCommandsApplyRef.current;
     if (uiBatch.length > 0) {
-      const uiDeps: OpenflowAgentExecutorDeps = {
-        sleep,
-        setCursor: (partial) => {
-          if (partial.x !== undefined || partial.y !== undefined) {
-            const x = partial.x ?? cursorPosRef.current.x;
-            const y = partial.y ?? cursorPosRef.current.y;
-            cursorPosRef.current = { x, y };
-            setCursor({ x, y, visible: true });
-          }
-          if (partial.actionLabel !== undefined) {
-            setCursorActionLabel(partial.actionLabel);
-          }
-        },
-        storeUpdateNodeData,
-      };
-      await executeOpenflowAgentCommands(uiBatch, uiDeps);
+      setCursorActionLabel("Applying…");
+      setIsExecutingStep(true);
+      try {
+        const uiDeps: OpenflowAgentExecutorDeps = {
+          sleep,
+          setCursor: (partial) => {
+            if (partial.x !== undefined || partial.y !== undefined) {
+              const x = partial.x ?? cursorPosRef.current.x;
+              const y = partial.y ?? cursorPosRef.current.y;
+              cursorPosRef.current = { x, y };
+              setCursor({ x, y, visible: true });
+            }
+            if (partial.actionLabel !== undefined) {
+              setCursorActionLabel(partial.actionLabel);
+            }
+          },
+          storeUpdateNodeData,
+        };
+        await executeOpenflowAgentCommands(uiBatch, uiDeps);
+      } finally {
+        setIsExecutingStep(false);
+        setClickRipple(null);
+        setCursorActionLabel("Ready");
+      }
     }
     const uiLabels = uiBatch.map(describeOpenflowUiCommand);
     pendingUiCommandsApplyRef.current = [];
@@ -1687,6 +1730,7 @@ export function FlowyAgentPanel({
 
       const originalOp = pendingOperations[index];
       const op = remapOperationNodeIds(originalOp, plannedToActualNodeIdRef.current);
+      setCursorActionLabel(describeOperation(originalOp));
       setIsExecutingStep(true);
 
       try {
@@ -1709,9 +1753,11 @@ export function FlowyAgentPanel({
         setExecutionIndex(index + 1);
       } finally {
         setIsExecutingStep(false);
+        setClickRipple(null);
+        setCursorActionLabel("Ready");
       }
     },
-    [onApplyEdits, orchestratorDeps, pendingOperations, sleep, storeUpdateNodeData]
+    [describeOperation, onApplyEdits, orchestratorDeps, pendingOperations, sleep, storeUpdateNodeData]
   );
 
   const handleApproveStep = useCallback(async () => {
@@ -1722,6 +1768,8 @@ export function FlowyAgentPanel({
     setExecutionIndex(0);
     setIsExecutingStep(false);
     setCursor((c) => ({ ...c, visible: true }));
+    setClickRipple(null);
+    setCursorActionLabel("Ready");
   }, []);
 
   const dismissPendingPlan = useCallback(() => {
@@ -1805,12 +1853,21 @@ export function FlowyAgentPanel({
     (async () => {
       const uiBatch = pendingUiCommandsApplyRef.current;
       if (uiBatch.length > 0) {
-        const uiDeps: OpenflowAgentExecutorDeps = {
-          sleep,
-          setCursor: (partial) => orchestratorDeps.setCursor(partial as Parameters<OrchestratorDeps["setCursor"]>[0]),
-          storeUpdateNodeData,
-        };
-        await executeOpenflowAgentCommands(uiBatch, uiDeps);
+        setCursorActionLabel("Applying…");
+        setIsExecutingStep(true);
+        try {
+          const uiDeps: OpenflowAgentExecutorDeps = {
+            sleep,
+            setCursor: (partial) =>
+              orchestratorDeps.setCursor(partial as Parameters<OrchestratorDeps["setCursor"]>[0]),
+            storeUpdateNodeData,
+          };
+          await executeOpenflowAgentCommands(uiBatch, uiDeps);
+        } finally {
+          setIsExecutingStep(false);
+          setClickRipple(null);
+          setCursorActionLabel("Ready");
+        }
         pendingUiCommandsApplyRef.current = [];
         setPendingUiCommands(null);
       }
@@ -3043,9 +3100,9 @@ export function FlowyAgentPanel({
         </div>
       )}
 
-      {/* Agent mouse cursor */}
-      {cursor.visible &&
-        isExecutingStep &&
+      {/* Assist pointer — always on canvas while Flowy panel is open (future: voice-first UI). */}
+      {isOpen &&
+        cursor.visible &&
         typeof document !== "undefined" &&
         createPortal(
           <div
@@ -3058,24 +3115,33 @@ export function FlowyAgentPanel({
               pointerEvents: "none",
             }}
           >
-            {/* Mouse pointer SVG — tip at (0,0) */}
+            {/* Arrow pointer — ~30% fill to match label bg-purple-950/30 transparency */}
             <svg
-              width="24" height="24" viewBox="0 0 24 24" fill="none"
-              style={{ filter: "drop-shadow(0 2px 6px rgba(0,0,0,0.5))" }}
+              width="28"
+              height="28"
+              viewBox="0 0 24 24"
+              fill="none"
+              style={{ filter: "drop-shadow(0 4px 14px rgba(88, 28, 135, 0.18))" }}
+              aria-hidden
             >
-              <path d="M5 3l14 8.5-6.5 1.5L9 19.5 5 3z" fill="#a855f7" stroke="#fff" strokeWidth="1.5" strokeLinejoin="round" />
+              <path
+                d="M5.5 3.25L5.5 18.2L9.15 14.55L11.35 20.05L13.45 19.35L11.25 13.85L17.25 13.85L5.5 3.25Z"
+                fill="rgba(168, 85, 247, 0.3)"
+                stroke="rgba(255, 255, 255, 0.45)"
+                strokeWidth="1.15"
+                strokeLinejoin="round"
+              />
             </svg>
-            {/* Action label badge */}
             <div
-              className="absolute left-5 top-5 whitespace-nowrap rounded-md border border-purple-700/70 bg-purple-900/80 px-2 py-0.5 text-[10px] font-semibold text-purple-100 shadow-lg backdrop-blur-sm"
+              className="absolute left-[22px] top-[18px] max-w-[min(100vw-3rem,20rem)] whitespace-normal rounded-xl border border-purple-400/20 bg-purple-950/30 px-2.5 py-1.5 text-[10px] font-medium leading-snug text-purple-100/90 shadow-none backdrop-blur-md ring-1 ring-inset ring-white/5"
             >
-              {cursorActionLabel}
+              {assistCursorStatusText}
             </div>
           </div>,
           document.body
         )}
 
-      {/* Click ripple effect */}
+      {/* Brief click flash (not a ring cursor) */}
       {clickRipple &&
         typeof document !== "undefined" &&
         createPortal(
@@ -3084,18 +3150,19 @@ export function FlowyAgentPanel({
             aria-hidden="true"
             style={{
               position: "fixed",
-              left: clickRipple.x,
-              top: clickRipple.y,
-              transform: "translate(-50%, -50%)",
+              left: clickRipple.x - 2,
+              top: clickRipple.y - 2,
               zIndex: 2147483646,
               pointerEvents: "none",
+              width: 5,
+              height: 5,
+              background: "rgba(168, 85, 247, 0.3)",
+              borderRadius: 1,
+              transformOrigin: "center",
+              boxShadow: "0 0 12px rgba(168, 85, 247, 0.22)",
+              animation: "assistClickFlash 320ms ease-out forwards",
             }}
-          >
-            <div
-              className="h-8 w-8 rounded-full border-2 border-purple-400/80 bg-purple-500/20 animate-ping"
-              style={{ animationDuration: "600ms", animationIterationCount: 1 }}
-            />
-          </div>,
+          />,
           document.body
         )}
     </div>
