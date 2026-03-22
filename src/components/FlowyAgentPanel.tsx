@@ -40,7 +40,6 @@ import {
   LayoutGrid,
   Loader2,
   Minus,
-  PanelRightClose,
   Settings2,
   SquarePlus,
 } from "lucide-react";
@@ -2675,22 +2674,14 @@ export function FlowyAgentPanel({
             aria-label="Open Flowy agent"
             className="group flex h-full w-full shrink-0 items-center justify-center rounded-[28px] outline-none transition-[transform,background-color] duration-200 ease-out hover:bg-white/[0.06] active:scale-[0.94] motion-reduce:active:scale-100 focus-visible:ring-2 focus-visible:ring-white/30"
           >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="22"
-              height="22"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              className="flowy-agent-fab-icon text-neutral-100 transition-[transform,filter] duration-300 ease-out group-hover:rotate-12 group-hover:drop-shadow-[0_0_10px_rgba(196,181,253,0.35)] motion-reduce:transition-none"
+            <img
+              src="/logo.png"
+              alt=""
+              width={22}
+              height={22}
+              className="flowy-agent-fab-icon size-[22px] transition-[transform,filter] duration-300 ease-out group-hover:rotate-12 group-hover:drop-shadow-[0_0_10px_rgba(196,181,253,0.35)] motion-reduce:transition-none"
               aria-hidden
-            >
-              <path d="M12 2l1.8 6.2L20 10l-6.2 1.8L12 18l-1.8-6.2L4 10l6.2-1.8L12 2z" />
-              <path d="M20 14l.9 3.1L24 18l-3.1.9L20 22l-.9-3.1L16 18l3.1-.9L20 14z" />
-            </svg>
+            />
           </button>
         ) : (
           <motion.div
@@ -2708,7 +2699,6 @@ export function FlowyAgentPanel({
         <div className="h-3 shrink-0" aria-hidden />
         <div className="relative z-10 flex w-full shrink-0 items-center justify-between gap-2 border-b border-white/[0.08] px-2 pb-2 pt-0">
           <div className="flex min-w-0 flex-1 items-center gap-2 px-1">
-            <div className="h-1 w-4 shrink-0 rounded-full bg-white/25" aria-hidden />
             <h2 className="min-w-0 truncate text-sm font-medium leading-tight tracking-tight text-neutral-100">
               {activeSession?.title ?? "New Chat"}
             </h2>
@@ -2725,11 +2715,18 @@ export function FlowyAgentPanel({
             <button
               type="button"
               onClick={handleFlowyMorphClose}
-              className="rounded-xl p-2 text-neutral-300 transition-[transform,background-color,color] duration-200 hover:bg-white/10 hover:text-white active:scale-95 motion-reduce:active:scale-100"
+              className="rounded-xl p-1.5 text-neutral-300 transition-[transform,background-color,color] duration-200 hover:bg-white/10 hover:text-white active:scale-95 motion-reduce:active:scale-100"
               aria-label="Collapse Flowy chat"
               title="Collapse to button"
             >
-              <PanelRightClose className="size-4" strokeWidth={2} aria-hidden />
+              <img
+                src="/logo.png"
+                alt=""
+                width={22}
+                height={22}
+                className="size-[22px] shrink-0 opacity-90"
+                aria-hidden
+              />
             </button>
           </div>
         </div>
@@ -2773,14 +2770,14 @@ export function FlowyAgentPanel({
             <p className="mx-auto mt-4 max-w-[20rem] text-[11px] leading-snug text-neutral-600">
               {historyRailOpen ? (
                 <>
-                  Pick a thread in <span className="text-neutral-500">Agent log</span> (menu above the pill, bottom-right);
+                  Pick a thread in <span className="text-neutral-500">History</span> (menu above the pill, bottom-right);
                   your <span className="text-neutral-500">next send</span> starts a <span className="text-neutral-500">new</span>{" "}
                   thread and passes that thread&apos;s history to Flowy. Empty drafts stay on the current thread until you
                   send.
                 </>
               ) : (
                 <>
-                  Open <span className="text-neutral-500">Agent log</span> bottom-right (next to{" "}
+                  Open <span className="text-neutral-500">History</span> bottom-right (next to{" "}
                   <span className="text-neutral-500">keyboard shortcuts</span>) to choose threads. Your{" "}
                   <span className="text-neutral-500">next send</span> starts a <span className="text-neutral-500">new</span> thread
                   and can attach a selected thread&apos;s history to Flowy.

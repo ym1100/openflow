@@ -24,7 +24,7 @@ export function ProjectsNavbar({
         className="flex items-center gap-2 text-foreground hover:opacity-80 transition-opacity"
       >
         <img
-          src="/banana_icon.png"
+          src="/logo.png"
           alt="Openflows"
           className="w-8 h-8"
         />

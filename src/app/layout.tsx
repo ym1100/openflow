@@ -6,6 +6,10 @@ import { GlobalShortcutsDialog } from "@/components/GlobalShortcutsDialog";
 export const metadata: Metadata = {
   title: "Openflows - AI Image Workflow",
   description: "Node-based image annotation and generation workflow using Nano Banana Pro",
+  icons: {
+    icon: "/logo.png",
+    apple: "/logo.png",
+  },
 };
 
 export default function RootLayout({

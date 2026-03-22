@@ -35,8 +35,6 @@ const createDefaultState = (overrides = {}) => ({
   saveToFile: mockSaveToFile,
   loadWorkflow: mockLoadWorkflow,
   duplicateWorkflowToPath: mockDuplicateWorkflowToPath,
-  previousWorkflowSnapshot: null,
-  revertToSnapshot: vi.fn(),
   shortcutsDialogOpen: false,
   setShortcutsDialogOpen: vi.fn(),
   setShowQuickstart: vi.fn(),
@@ -55,13 +53,12 @@ describe("Header", () => {
   });
 
   describe("Basic Rendering", () => {
-    it("should render the banana logo in the menu button", () => {
+    it("should render the menu icon in the Openflows menu button", () => {
       render(<Header />);
       const menu = screen.getByRole("button", { name: "Openflows menu" });
       expect(menu).toBeInTheDocument();
-      const icon = menu.querySelector("img");
+      const icon = menu.querySelector("svg");
       expect(icon).toBeInTheDocument();
-      expect(icon).toHaveAttribute("src", "/banana_icon.png");
     });
 
     it("should not render Made by Willie link", () => {
@@ -115,14 +112,14 @@ describe("Header", () => {
     it("should open dropdown when logo menu is clicked", () => {
       render(<Header />);
       fireEvent.click(screen.getByRole("button", { name: "Openflows menu" }));
-      expect(screen.getByText("Rename project")).toBeInTheDocument();
+      expect(screen.getByText("Project settings")).toBeInTheDocument();
       expect(screen.getByText("Duplicate project")).toBeInTheDocument();
     });
 
-    it("should open ProjectSetupModal in settings mode when Rename project clicked", () => {
+    it("should open ProjectSetupModal in settings mode when Project settings clicked", () => {
       render(<Header />);
       fireEvent.click(screen.getByRole("button", { name: "Openflows menu" }));
-      fireEvent.click(screen.getByText("Rename project"));
+      fireEvent.click(screen.getByText("Project settings"));
       const modal = screen.getByTestId("project-setup-modal");
       expect(modal).toBeInTheDocument();
       expect(modal).toHaveAttribute("data-mode", "settings");
@@ -145,11 +142,11 @@ describe("Header", () => {
   });
 
   describe("Unconfigured Project Dropdown", () => {
-    it("should show New project instead of Rename when unconfigured", () => {
+    it("should show New project instead of Project settings when unconfigured", () => {
       render(<Header />);
       fireEvent.click(screen.getByRole("button", { name: "Openflows menu" }));
       expect(screen.getByText("New project")).toBeInTheDocument();
-      expect(screen.queryByText("Rename project")).not.toBeInTheDocument();
+      expect(screen.queryByText("Project settings")).not.toBeInTheDocument();
       expect(screen.queryByText("Duplicate project")).not.toBeInTheDocument();
     });
 

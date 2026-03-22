@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { usePathname } from "next/navigation";
 import Link from "next/link";
-import { ChevronDown, Wand2 } from "lucide-react";
+import { ChevronDown, Menu } from "lucide-react";
 import { useWorkflowStore, WorkflowFile } from "@/store/workflowStore";
 import { useShallow } from "zustand/shallow";
 import {
@@ -26,8 +26,6 @@ export function Header() {
     saveToFile,
     loadWorkflow,
     duplicateWorkflowToPath,
-    previousWorkflowSnapshot,
-    revertToSnapshot,
     shortcutsDialogOpen,
     setShortcutsDialogOpen,
     setShowQuickstart,
@@ -47,8 +45,6 @@ export function Header() {
     saveToFile: state.saveToFile,
     loadWorkflow: state.loadWorkflow,
     duplicateWorkflowToPath: state.duplicateWorkflowToPath,
-    previousWorkflowSnapshot: state.previousWorkflowSnapshot,
-    revertToSnapshot: state.revertToSnapshot,
     shortcutsDialogOpen: state.shortcutsDialogOpen,
     setShortcutsDialogOpen: state.setShortcutsDialogOpen,
     setShowQuickstart: state.setShowQuickstart,
@@ -139,12 +135,6 @@ export function Header() {
     if (!success) alert("Failed to duplicate project. Please try again.");
   };
 
-  const handleRevertAIChanges = useCallback(() => {
-    if (window.confirm("Are you sure? This will restore your previous workflow.")) {
-      revertToSnapshot();
-    }
-  }, [revertToSnapshot]);
-
   const projectDisplayName = isProjectConfigured ? workflowName : "Untitled Project";
 
   const handleFlowyThreadsClick = useCallback(() => {
@@ -180,7 +170,7 @@ export function Header() {
             aria-expanded={dropdownOpen}
             aria-haspopup="menu"
           >
-            <img src="/banana_icon.png" alt="" className="w-6 h-6" />
+            <Menu className="size-6 text-neutral-100" strokeWidth={2} aria-hidden />
           </button>
 
           {dropdownOpen && (
@@ -236,10 +226,21 @@ export function Header() {
                 onClick={isProjectConfigured ? handleOpenSettings : handleNewProject}
                 className="flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-neutral-200 transition-colors hover:bg-white/10 focus-visible:bg-white/10 focus-visible:outline-none"
               >
-                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                </svg>
-                {isProjectConfigured ? "Rename project" : "New project"}
+                {isProjectConfigured ? (
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"
+                    />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                ) : (
+                  <svg className="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                  </svg>
+                )}
+                {isProjectConfigured ? "Project settings" : "New project"}
               </button>
               {isProjectConfigured && (
               <button
@@ -278,40 +279,16 @@ export function Header() {
           )}
         </div>
 
-        {/* Project name (display only) + settings */}
-        <div className="flex flex-1 items-center gap-2 min-w-0 max-w-[320px]">
-          <div className="flex flex-1 items-center rounded-full border border-[var(--color-border)] bg-[var(--color-card)]/90 p-1.5 pr-2 shadow-sm backdrop-blur-sm min-w-0">
+        {/* Project name (display only) — settings live under the logo menu */}
+        <div className="flex min-w-0 max-w-[320px] flex-1 items-center gap-2">
+          <div className="flex min-w-0 flex-1 items-center rounded-full border border-[var(--color-border)] bg-[var(--color-card)]/90 p-1.5 pr-2 shadow-sm backdrop-blur-sm">
             <div
-              className="flex flex-1 items-center min-w-0 px-3 py-1 text-sm text-neutral-200 truncate select-none"
+              className="flex min-w-0 flex-1 select-none truncate px-3 py-1 text-sm text-neutral-200"
               title={projectDisplayName}
             >
               {projectDisplayName}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={handleOpenSettings}
-            className="h-10 w-10 shrink-0 rounded-full border border-[var(--color-border)] bg-[var(--color-card)]/90 flex items-center justify-center text-neutral-400 hover:text-neutral-200 hover:bg-neutral-700/50 backdrop-blur-sm transition-colors"
-            title="Project settings"
-          >
-            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-              <path strokeLinecap="round" strokeLinejoin="round" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-            </svg>
-          </button>
-        </div>
-
-        {/* Right actions */}
-        <div className="flex shrink-0 items-center gap-1">
-          {previousWorkflowSnapshot && (
-            <button
-              onClick={handleRevertAIChanges}
-              className="px-2.5 py-1.5 text-xs text-neutral-300 hover:text-neutral-100 bg-neutral-700/50 hover:bg-neutral-700 border border-neutral-600 rounded-full transition-colors"
-              title="Restore workflow from before AI changes"
-            >
-              Revert AI
-            </button>
-          )}
         </div>
       </div>
 
@@ -336,14 +313,14 @@ export function Header() {
             aria-controls={FLOWY_AGENT_LOG_THREADS_MENU_ID}
             title={
               !flowyAgentOpen
-                ? "Open Flowy and agent log"
+                ? "Open Flowy and history"
                 : flowyHistoryRailOpen
                   ? "Hide chat threads"
                   : "Show chat threads"
             }
             aria-label={
               !flowyAgentOpen
-                ? "Open Flowy and agent log"
+                ? "Open Flowy and history"
                 : flowyHistoryRailOpen
                   ? "Hide chat threads"
                   : "Show chat threads"
@@ -355,8 +332,7 @@ export function Header() {
             }`}
           >
             <div className="flex min-w-0 flex-1 items-center gap-2" role="status" aria-live="polite">
-              <Wand2 className="size-4 shrink-0 text-neutral-200" strokeWidth={2} aria-hidden />
-              <span className="hidden min-w-0 truncate sm:inline">Agent log</span>
+              <span className="min-w-0 truncate">History</span>
             </div>
             <ChevronDown
               className={`size-[18px] shrink-0 text-neutral-400 transition-transform duration-300 ${
