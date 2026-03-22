@@ -1934,23 +1934,10 @@ export function FlowyAgentPanel({
     [sortedSessions, activeSessionId]
   );
 
-  const continuationComposerHint = useMemo(() => {
+  const continuationThreadTitle = useMemo(() => {
     if (!continuationSourceSessionId) return null;
     const s = sessions.find((x) => x.id === continuationSourceSessionId);
-    if (!s) return null;
-    const tail = s.messages.slice(-4);
-    const preview =
-      tail.length > 0
-        ? tail
-            .map((m) => {
-              const role = m.role === "user" ? "You" : "Flowy";
-              const t = m.text.replace(/\s+/g, " ").trim().slice(0, 100);
-              return `${role}: ${t}${m.text.length > 100 ? "…" : ""}`;
-            })
-            .join(" · ")
-            .slice(0, 280)
-        : "(empty thread)";
-    return { title: s.title, preview };
+    return s?.title ?? null;
   }, [continuationSourceSessionId, sessions]);
 
   const switchToSession = useCallback(
@@ -2135,8 +2122,7 @@ export function FlowyAgentPanel({
               isExecutingStep={isExecutingStep}
               isRunning={isRunning}
               chatInputPlaceholder={chatInputPlaceholder}
-              continuationTitle={continuationComposerHint?.title ?? null}
-              continuationPreview={continuationComposerHint?.preview ?? null}
+              continuationTitle={continuationThreadTitle}
               onClearContinuation={
                 continuationSourceSessionId
                   ? () => setContinuationSourceSessionId(null)
@@ -2163,16 +2149,17 @@ export function FlowyAgentPanel({
         : null}
       {isOpen ? (
     <div
-      className="pointer-events-none fixed top-[4.5rem] right-4 z-40 flex h-[calc(100vh-5.5rem)] max-h-[calc(100vh-5.5rem)] w-[min(480px,calc(100vw-2rem))] flex-col gap-3"
+      className="pointer-events-none fixed top-[4.5rem] right-4 z-40 flex h-[calc(100vh-5.5rem-min(20vh,464px))] max-h-[calc(100vh-5.5rem-min(20vh,464px))] w-[min(280px,calc(100vw-2rem))] flex-col gap-2"
     >
     <div
       role="dialog"
       aria-modal="true"
       aria-label="Flowy AI chat"
       data-testid="flowy-sidebar"
-      className="pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-[24px] border border-white/[0.11] bg-[rgb(25,25,25)]/90 shadow-[0_8px_10px_-6px_rgba(0,0,0,0.1),0_20px_25px_-5px_rgba(0,0,0,0.1)] backdrop-blur-[12px] transition-all duration-200"
+      className="pointer-events-auto flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-white/[0.14] bg-[rgb(22,23,24)]/95 pb-3 shadow-[0_8px_32px_-14px_rgba(0,0,0,0.55)] backdrop-blur-xl transition-all duration-200"
     >
-      <div className="relative z-10 flex w-full shrink-0 items-center justify-between gap-2 border-b border-white/10 p-2">
+      <div className="h-5 shrink-0" aria-hidden />
+      <div className="relative z-10 flex w-full shrink-0 items-center justify-between gap-2 border-b border-white/[0.08] px-2 pb-2 pt-0">
         <div className="flex min-w-0 flex-1 items-center gap-2 px-1">
           <div className="h-1 w-4 shrink-0 rounded-full bg-white/25" aria-hidden />
           <h2 className="min-w-0 truncate text-sm font-medium leading-tight tracking-tight text-neutral-100">
@@ -2207,13 +2194,13 @@ export function FlowyAgentPanel({
         </div>
       </div>
 
-      <div className="relative -mb-8 flex min-h-0 w-full flex-1 flex-col overflow-hidden">
+      <div className="relative -mb-6 flex min-h-0 w-full flex-1 flex-col overflow-hidden">
         <div
-          className="flowy-chat-scrollbar flex min-h-0 w-full flex-1 flex-col overflow-y-auto overflow-x-hidden pb-16"
+          className="flowy-chat-scrollbar flex min-h-0 w-full flex-1 flex-col overflow-y-auto overflow-x-hidden pb-12 [scrollbar-width:thin]"
           onWheelCapture={(e) => e.stopPropagation()}
           style={{ touchAction: "pan-y", overflowAnchor: "none" as const }}
         >
-          <div className="flex flex-col gap-6 py-4">
+          <div className="flex flex-col gap-4 py-3">
         {errorMessage && (
           <div className="mx-4 rounded-xl border border-red-800/60 bg-red-950/40 p-3 text-sm text-red-200">
             {errorMessage}
@@ -2253,7 +2240,7 @@ export function FlowyAgentPanel({
         {chatMessages.map((m) =>
           m.role === "user" ? (
             <div key={m.id} className="group/message flex select-text flex-col items-end gap-2.5 px-4 py-1">
-              <div className="max-w-[85%] rounded-2xl bg-white/[0.1] px-4 py-2 text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.08)] backdrop-blur-sm">
+              <div className="max-w-[92%] rounded-2xl border border-white/[0.12] bg-white/[0.06] px-4 py-2.5 text-white shadow-[inset_0_0_0_1px_rgba(255,255,255,0.04)] backdrop-blur-md">
                 <div className="flowy-chat-md text-sm leading-[1.5]">
                   {renderChatMarkdown(m.text)}
                 </div>
@@ -2271,8 +2258,8 @@ export function FlowyAgentPanel({
             </div>
           ) : (
             <div key={m.id} className="group/message flex w-full select-text flex-col gap-1 py-1">
-              <div className="px-6">
-                <div className="text-sm leading-[1.4] tracking-[-0.14px] text-neutral-100">
+              <div className="px-4">
+                <div className="text-sm leading-relaxed tracking-[-0.14px] text-neutral-100">
                   <div className="flowy-chat-md whitespace-normal break-words">
                     {renderChatMarkdown(m.text)}
                   </div>
@@ -2351,7 +2338,7 @@ export function FlowyAgentPanel({
 
         {isPlanning && (
           <div className="group/message flex w-full select-text flex-col gap-1 py-1">
-            <div className="px-6">
+            <div className="px-4">
               <div className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-neutral-300">
                 <Loader2 className="size-3.5 animate-spin" aria-hidden />
                 <span>{plannerStageEvent?.detail || plannerProgress || "Flowy is thinking..."}</span>
@@ -2362,7 +2349,7 @@ export function FlowyAgentPanel({
 
         {pendingOperations && (
           <div className="group/message flex w-full select-text flex-col gap-4 py-1">
-            <div className="px-5">
+            <div className="px-4">
               <div className="flex flex-col">
                 <button
                   type="button"
@@ -2479,10 +2466,10 @@ export function FlowyAgentPanel({
       <div
         data-testid="flowy-sidebar-footer"
         className="relative z-10 mt-auto w-full shrink-0 select-text border-t border-white/10"
-        style={{ background: "#171717" }}
+        style={{ background: "rgb(22 23 24 / 0.98)" }}
       >
         <div
-          className="pointer-events-none absolute bottom-full left-0 right-0 h-12 bg-gradient-to-b from-transparent to-[#171717]"
+          className="pointer-events-none absolute bottom-full left-0 right-0 h-12 bg-gradient-to-b from-transparent to-[rgb(22,23,24)]"
           aria-hidden
         />
         <div aria-live="polite" aria-atomic="true" className="sr-only">
@@ -2624,7 +2611,7 @@ export function FlowyAgentPanel({
         </div>
         <div
           className="px-3 pb-1.5 pt-0 text-center text-[12px] leading-snug text-neutral-600"
-          style={{ background: "#171717" }}
+          style={{ background: "rgb(22 23 24 / 0.98)" }}
         >
           <span className="text-neutral-500">Flowy is experimental.</span>{" "}
           <span className="text-neutral-600">
@@ -2641,7 +2628,7 @@ export function FlowyAgentPanel({
         role="region"
         aria-label="Chat history"
         data-testid="flowy-chat-history-rail"
-        className="pointer-events-auto flex w-full shrink-0 flex-col overflow-hidden rounded-[20px] border border-white/12 bg-[rgb(22,22,22)]/95 shadow-[0_8px_24px_-10px_rgba(0,0,0,0.45)] backdrop-blur-xl"
+        className="pointer-events-auto flex w-full shrink-0 flex-col overflow-hidden rounded-2xl border border-white/[0.14] bg-[rgb(22,23,24)]/95 pb-3 shadow-[0_8px_32px_-14px_rgba(0,0,0,0.55)] backdrop-blur-xl"
       >
         <div className="flex justify-center border-b border-white/[0.06] py-2" aria-hidden>
           <div className="h-0.5 w-7 rounded-full bg-white/20" />
@@ -2660,7 +2647,7 @@ export function FlowyAgentPanel({
                   <div
                     className={`flex items-center gap-0.5 rounded-xl px-1 py-1 ${
                       isActive ? "bg-white/[0.12]" : "hover:bg-white/[0.06]"
-                    } ${isContinuationSource ? "ring-1 ring-inset ring-emerald-400/40" : ""}`}
+                    } ${isContinuationSource ? "ring-1 ring-inset ring-purple-400/40" : ""}`}
                   >
                     <button
                       type="button"
@@ -2684,9 +2671,9 @@ export function FlowyAgentPanel({
                       <Check
                         className={`size-3.5 shrink-0 ${
                           isContinuationSource
-                            ? "text-emerald-300"
+                            ? "text-purple-300"
                             : isActive
-                              ? "text-emerald-400/90"
+                              ? "text-purple-400/90"
                               : "text-neutral-600"
                         }`}
                         strokeWidth={2.5}

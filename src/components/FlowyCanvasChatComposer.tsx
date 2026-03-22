@@ -35,7 +35,6 @@ export type FlowyCanvasChatComposerProps = {
   chatInputPlaceholder: string;
   /** Thread selected in history rail — next composer send will fork and merge this thread’s capped history into the planner payload. */
   continuationTitle?: string | null;
-  continuationPreview?: string | null;
   onClearContinuation?: () => void;
   contextNodeChips: FlowyContextNodeChip[];
   onRemoveMentionedNode: (nodeId: string) => void;
@@ -60,7 +59,6 @@ export function FlowyCanvasChatComposer({
   isRunning,
   chatInputPlaceholder,
   continuationTitle,
-  continuationPreview,
   onClearContinuation,
   contextNodeChips,
   onRemoveMentionedNode,
@@ -95,32 +93,23 @@ export function FlowyCanvasChatComposer({
               <span>Flowy is thinking...</span>
             </div>
           )}
-          {(continuationTitle || continuationPreview) && (
+          {continuationTitle ? (
             <div
-              className="-mt-1 rounded-xl border border-emerald-400/25 bg-emerald-500/[0.08] px-2 py-1.5"
+              className="-mt-1 rounded-xl border border-purple-400/20 bg-purple-950/30 px-2 py-1.5 shadow-none ring-1 ring-inset ring-white/5"
               role="status"
               aria-live="polite"
+              aria-label={`Selected thread: ${continuationTitle}`}
             >
-              <div className="flex items-start gap-2">
-                <div className="min-w-0 flex-1">
-                  <p className="text-[10px] font-medium uppercase tracking-wide text-emerald-200/80">
-                    Context for next send
-                  </p>
-                  {continuationTitle ? (
-                    <p className="truncate text-[12px] font-medium text-neutral-100">{continuationTitle}</p>
-                  ) : null}
-                  {continuationPreview ? (
-                    <p className="mt-0.5 line-clamp-2 text-[10px] leading-snug text-neutral-400">
-                      {continuationPreview}
-                    </p>
-                  ) : null}
-                </div>
+              <div className="flex items-center gap-2">
+                <p className="min-w-0 flex-1 truncate text-[12px] font-medium leading-snug text-purple-100/90">
+                  {continuationTitle}
+                </p>
                 {onClearContinuation ? (
                   <button
                     type="button"
                     onClick={onClearContinuation}
-                    className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-white/10 text-neutral-400 transition-colors hover:bg-white/10 hover:text-neutral-100"
-                    aria-label="Clear attached thread context"
+                    className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-purple-400/15 text-purple-200/70 transition-colors hover:bg-purple-500/15 hover:text-purple-100"
+                    aria-label="Clear selected thread context"
                     title="Clear"
                   >
                     <X className="size-3.5" strokeWidth={2} aria-hidden />
@@ -128,7 +117,7 @@ export function FlowyCanvasChatComposer({
                 ) : null}
               </div>
             </div>
-          )}
+          ) : null}
           {contextNodeChips.length > 0 && (
             <div
               role="list"
