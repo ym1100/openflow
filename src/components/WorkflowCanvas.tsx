@@ -230,6 +230,11 @@ export function WorkflowCanvas() {
   const flowyHistoryRailOpen = useWorkflowStore((s) => s.flowyHistoryRailOpen);
   /** True while Flowy is sending canvas/workflow context to the planner (edge vignette on canvas). */
   const [isFlowyCanvasReading, setIsFlowyCanvasReading] = useState(false);
+  /** Assist pointer position in flow-container coords while planning — drives purple dot spotlight. */
+  const [agentSpotlightPosition, setAgentSpotlightPosition] = useState<{
+    x: number;
+    y: number;
+  } | null>(null);
   const [flowyComposerMountEl, setFlowyComposerMountEl] = useState<HTMLDivElement | null>(null);
   const [isBuildingWorkflow, setIsBuildingWorkflow] = useState(false);
   const [showNewProjectSetup, setShowNewProjectSetup] = useState(false);
@@ -1694,7 +1699,11 @@ export function WorkflowCanvas() {
         className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
         onMouseMove={handleSpotlightMouseMove}
       >
-        <CursorGlowDotBackground mousePosition={spotlightMouse} />
+        <CursorGlowDotBackground
+          mousePosition={spotlightMouse}
+          agentSpotlightActive={isFlowyCanvasReading}
+          agentSpotlightPosition={agentSpotlightPosition}
+        />
         <ReactFlow
         ref={reactFlowRootRef}
         nodes={allNodes}
@@ -1840,6 +1849,8 @@ export function WorkflowCanvas() {
         workflowState={chatWorkflowState}
         selectedNodeIds={selectedNodeIds}
         onCanvasReadingChange={setIsFlowyCanvasReading}
+        spotlightContainerRef={flowSpotlightContainerRef}
+        onAgentSpotlightPositionChange={setAgentSpotlightPosition}
         composerMountEl={flowyComposerMountEl}
         historyRailOpen={flowyHistoryRailOpen}
       />

@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type ReactNode,
+  type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { motion } from "motion/react";
@@ -709,6 +710,9 @@ export function FlowyAgentPanel({
   selectedNodeIds,
   /** Fired when Flowy is building/sending canvas context to the planner (for canvas edge glow, etc.). */
   onCanvasReadingChange,
+  /** Canvas flow area — converts assist pointer (fixed screen coords) to dot-grid spotlight coords. */
+  spotlightContainerRef,
+  onAgentSpotlightPositionChange,
   composerMountEl,
   /** When false, thread list is hidden; use bottom bar toggle (WorkflowCanvas) to show. Default true if omitted. */
   historyRailOpen = true,
@@ -722,6 +726,8 @@ export function FlowyAgentPanel({
   workflowState?: WorkflowState;
   selectedNodeIds?: string[];
   onCanvasReadingChange?: (active: boolean) => void;
+  spotlightContainerRef?: RefObject<HTMLElement | null>;
+  onAgentSpotlightPositionChange?: (pos: { x: number; y: number } | null) => void;
   /** Where to render the always-visible canvas-bottom chat composer (portal target). */
   composerMountEl?: HTMLElement | null;
   historyRailOpen?: boolean;
@@ -808,6 +814,7 @@ export function FlowyAgentPanel({
   useEffect(() => {
     onCanvasReadingChange?.(isPlanning);
   }, [isPlanning, onCanvasReadingChange]);
+
   const [isRunning, setIsRunning] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
@@ -839,6 +846,23 @@ export function FlowyAgentPanel({
     y: 0,
     visible: true,
   });
+  useEffect(() => {
+    if (!onAgentSpotlightPositionChange) return;
+    if (!isPlanning) {
+      onAgentSpotlightPositionChange(null);
+      return;
+    }
+    const el = spotlightContainerRef?.current;
+    if (!el) {
+      onAgentSpotlightPositionChange(null);
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    onAgentSpotlightPositionChange({
+      x: cursor.x - rect.left,
+      y: cursor.y - rect.top,
+    });
+  }, [isPlanning, cursor.x, cursor.y, spotlightContainerRef, onAgentSpotlightPositionChange]);
   const [clickRipple, setClickRipple] = useState<{ x: number; y: number; id: number } | null>(null);
   const cursorPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
   const [isExecutingStep, setIsExecutingStep] = useState(false);
