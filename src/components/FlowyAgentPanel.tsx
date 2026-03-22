@@ -1471,14 +1471,19 @@ export function FlowyAgentPanel({
           setActiveDecomposition(data.decomposition);
         }
 
-        let displayText = assistantText;
-        if (data.qualityCheck) {
+        const uiParsedForPlan = parseOpenflowUiCommandsFromJson(data.uiCommands);
+        /** Plan response with canvas/UI steps — timeline + footer already convey risk/approval; skip duplicating in chat. */
+        const hasApplyTimeline =
+          mode === "plan" && (ops.length > 0 || uiParsedForPlan.length > 0);
+
+        let displayText = assistantText.trimEnd();
+        if (data.qualityCheck && !hasApplyTimeline) {
           const qc = data.qualityCheck;
           const verdictEmoji = qc.verdict === "accept" ? "✓" : qc.verdict === "refine" ? "↻" : qc.verdict === "error_recovery" ? "⚠" : "↺";
           const qcSummary = `\n\n**Quality check** ${verdictEmoji} ${qc.verdict} (${Math.round(qc.confidence * 100)}%): ${qc.assessment}`;
           displayText += qcSummary;
         }
-        if (data.safetyPolicy?.riskSummary) {
+        if (data.safetyPolicy?.riskSummary && !hasApplyTimeline) {
           const rs = data.safetyPolicy.riskSummary;
           const safetySummary =
             `\n\n**Safety policy**: safe=${rs.safe ?? 0}, caution=${rs.caution ?? 0}, destructive=${rs.destructive ?? 0}` +
@@ -1499,9 +1504,8 @@ export function FlowyAgentPanel({
           setExecutionIndex(0);
           autoRunCompletedRef.current = true;
         } else {
-          const uiParsed = parseOpenflowUiCommandsFromJson(data.uiCommands);
-          pendingUiCommandsApplyRef.current = uiParsed;
-          setPendingUiCommands(uiParsed);
+          pendingUiCommandsApplyRef.current = uiParsedForPlan;
+          setPendingUiCommands(uiParsedForPlan);
           setPendingOperations(ops);
           setPendingExplanation(displayText);
           setExecutionIndex(0);
@@ -2523,11 +2527,13 @@ export function FlowyAgentPanel({
               }}
             />
           ) : (
-            <div key={m.id} className="group/message flex w-full select-text flex-col gap-1 py-1">
+            <div key={m.id} className="group/message flex w-full select-text flex-col gap-1.5 py-1">
               <div className="px-4">
-                <div className="text-sm leading-relaxed tracking-[-0.14px] text-neutral-100">
-                  <div className="flowy-chat-md whitespace-normal break-words">
-                    {renderChatMarkdown(m.text)}
+                <div className="max-w-[min(100%,26rem)] rounded-2xl rounded-tl-md border border-transparent bg-transparent px-3 py-2.5">
+                  <div className="text-sm leading-relaxed tracking-[-0.14px] text-neutral-100">
+                    <div className="flowy-chat-md whitespace-normal break-words">
+                      {renderChatMarkdown(m.text)}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -2538,14 +2544,21 @@ export function FlowyAgentPanel({
           )
         )}
 
-        {(activeDecomposition && activeDecomposition.totalStages > 0) || plannerStageEvent ? (
-          <div className="mx-4 my-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+        {(isPlanning ||
+          plannerStageEvent != null ||
+          (activeDecomposition != null && activeDecomposition.totalStages > 0)) && (
+          <div
+            className="mx-4 my-2 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 shadow-[inset_0_1px_0_0_rgba(255,255,255,0.04)]"
+            role="status"
+            aria-live="polite"
+            aria-busy={isPlanning}
+          >
             <div className="mb-2 flex items-center gap-2 text-[11px] text-neutral-200">
-              <Sparkles className="size-3 shrink-0" aria-hidden />
-              <span className="font-medium">
+              <Sparkles className="size-3 shrink-0 text-violet-300/90" aria-hidden />
+              <span className="font-medium tracking-tight">
                 {activeDecomposition && activeDecomposition.totalStages > 0
-                  ? `Todo stages (${activeDecomposition.currentStageIndex + 1}/${activeDecomposition.totalStages})`
-                  : (plannerStageEvent?.stageTitle || "Planning")}
+                  ? `Stages (${activeDecomposition.currentStageIndex + 1}/${activeDecomposition.totalStages})`
+                  : plannerStageEvent?.stageTitle?.trim() || "Planning"}
               </span>
             </div>
             {activeDecomposition && activeDecomposition.totalStages > 0 ? (
@@ -2594,22 +2607,19 @@ export function FlowyAgentPanel({
                 })}
               </div>
             ) : (
-              <div className="flex items-center gap-2 text-[11px] text-neutral-400">
-                <Circle className="size-3.5 text-blue-300" aria-hidden />
-                <span>{plannerStageEvent?.detail || plannerProgress || "Flowy is thinking..."}</span>
+              <div className="flex items-start gap-2.5 text-[11px] leading-snug text-neutral-400">
+                {isPlanning ? (
+                  <Loader2 className="mt-0.5 size-3.5 shrink-0 animate-spin text-blue-300" aria-hidden />
+                ) : (
+                  <Circle className="mt-0.5 size-3.5 shrink-0 text-blue-300/80" aria-hidden />
+                )}
+                <span className="min-w-0 text-neutral-300/90">
+                  {plannerStageEvent?.detail?.trim() ||
+                    plannerProgress?.trim() ||
+                    (isPlanning ? "Working on your request…" : "—")}
+                </span>
               </div>
             )}
-          </div>
-        ) : null}
-
-        {isPlanning && (
-          <div className="group/message flex w-full select-text flex-col gap-1 py-1">
-            <div className="px-4">
-              <div className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.04] px-3 py-2 text-xs text-neutral-300">
-                <Loader2 className="size-3.5 animate-spin" aria-hidden />
-                <span>{plannerStageEvent?.detail || plannerProgress || "Flowy is thinking..."}</span>
-              </div>
-            </div>
           </div>
         )}
 
