@@ -220,6 +220,8 @@ export function ProjectSetupModal({
         setActiveTab("project");
       } else if (mode === "settings") {
         setActiveTab("preferences");
+      } else if (mode === "duplicate") {
+        setActiveTab("project");
       }
 
       if (mode === "settings") {
@@ -502,6 +504,7 @@ export function ProjectSetupModal({
       onWheelCapture={(e) => e.stopPropagation()}
     >
       <div
+        data-testid="project-setup-dialog"
         className="h-[720px] w-[90%] max-w-[1440px] rounded-2xl border border-neutral-700/80 bg-neutral-900/95 shadow-2xl overflow-hidden flex flex-col"
         onKeyDown={handleKeyDown}
       >

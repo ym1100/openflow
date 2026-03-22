@@ -15,6 +15,11 @@ vi.mock("@/store/workflowStore", () => ({
   },
 }));
 
+vi.mock("@/components/NewProjectModal", () => ({
+  NewProjectModal: ({ isOpen }: { isOpen: boolean }) =>
+    isOpen ? <div data-testid="new-project-modal">New Project Modal</div> : null,
+}));
+
 vi.mock("@/components/ProjectSetupModal", () => ({
   ProjectSetupModal: ({ isOpen, mode }: { isOpen: boolean; mode: string }) =>
     isOpen ? <div data-testid="project-setup-modal" data-mode={mode}>Project Setup Modal</div> : null,
@@ -150,13 +155,11 @@ describe("Header", () => {
       expect(screen.queryByText("Duplicate project")).not.toBeInTheDocument();
     });
 
-    it("should open ProjectSetupModal in new mode when New project clicked", () => {
+    it("should open NewProjectModal when New project clicked", () => {
       render(<Header />);
       fireEvent.click(screen.getByRole("button", { name: "Openflows menu" }));
       fireEvent.click(screen.getByText("New project"));
-      const modal = screen.getByTestId("project-setup-modal");
-      expect(modal).toBeInTheDocument();
-      expect(modal).toHaveAttribute("data-mode", "new");
+      expect(screen.getByTestId("new-project-modal")).toBeInTheDocument();
     });
   });
 

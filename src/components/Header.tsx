@@ -10,6 +10,7 @@ import {
   FLOWY_AGENT_LOG_THREADS_MENU_ID,
   useFlowyAgentLogAnchorRef,
 } from "@/providers/flowy-agent-log-anchor";
+import { NewProjectModal } from "./NewProjectModal";
 import { ProjectSetupModal } from "./ProjectSetupModal";
 import { KeyboardShortcutsDialog } from "./KeyboardShortcutsDialog";
 import { GlobalImageHistory } from "./GlobalImageHistory";
@@ -148,12 +149,17 @@ export function Header() {
 
   return (
     <>
+      <NewProjectModal
+        isOpen={showProjectModal && projectModalMode === "new"}
+        onClose={() => setShowProjectModal(false)}
+        onSave={handleProjectSave}
+      />
       <ProjectSetupModal
-        isOpen={showProjectModal}
+        isOpen={showProjectModal && projectModalMode !== "new"}
         onClose={() => setShowProjectModal(false)}
         onSave={handleProjectSave}
         onDuplicate={handleProjectDuplicate}
-        mode={projectModalMode}
+        mode={projectModalMode === "duplicate" ? "duplicate" : "settings"}
       />
       <input ref={fileInputRef} type="file" accept=".json" onChange={handleFileChange} className="hidden" />
 

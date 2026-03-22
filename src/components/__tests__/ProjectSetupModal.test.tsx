@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { ProjectSetupModal } from "@/components/ProjectSetupModal";
 import { ProviderSettings } from "@/types";
+import { defaultCanvasNavigationSettings } from "@/types/canvas";
 
 // Mock the workflow store
 const mockSetUseExternalImageStorage = vi.fn();
@@ -57,12 +58,20 @@ const defaultProviderSettings: ProviderSettings = {
 const createDefaultState = (overrides = {}) => ({
   workflowName: "",
   workflowId: "",
+  workflowThumbnail: null as string | null,
   saveDirectoryPath: "",
   useExternalImageStorage: true,
   providerSettings: defaultProviderSettings,
   setUseExternalImageStorage: mockSetUseExternalImageStorage,
+  setWorkflowThumbnail: vi.fn(),
   updateProviderApiKey: mockUpdateProviderApiKey,
   toggleProvider: mockToggleProvider,
+  maxConcurrentCalls: 4,
+  setMaxConcurrentCalls: vi.fn(),
+  canvasNavigationSettings: defaultCanvasNavigationSettings,
+  updateCanvasNavigationSettings: vi.fn(),
+  edgeStyle: "angular" as const,
+  setEdgeStyle: vi.fn(),
   ...overrides,
 });
 
@@ -120,7 +129,7 @@ describe("ProjectSetupModal", () => {
       expect(screen.getByText("New Project")).toBeInTheDocument();
     });
 
-    it("should render with 'Project Settings' title when mode is 'settings'", () => {
+    it("should render Preferences heading when mode is 'settings'", () => {
       render(
         <ProjectSetupModal
           isOpen={true}
@@ -130,7 +139,7 @@ describe("ProjectSetupModal", () => {
         />
       );
 
-      expect(screen.getByText("Project Settings")).toBeInTheDocument();
+      expect(screen.getByRole("heading", { name: "Preferences" })).toBeInTheDocument();
     });
   });
 
@@ -225,7 +234,7 @@ describe("ProjectSetupModal", () => {
       );
 
       expect(screen.getByText("Project Name")).toBeInTheDocument();
-      expect(screen.getByText("Project Directory")).toBeInTheDocument();
+      expect(screen.getByText("Project directory")).toBeInTheDocument();
     });
 
     it("should render Browse button for directory selection", () => {
@@ -273,6 +282,8 @@ describe("ProjectSetupModal", () => {
           mode="settings"
         />
       );
+
+      fireEvent.click(screen.getByRole("tab", { name: "Project" }));
 
       const nameInput = screen.getByPlaceholderText("my-project") as HTMLInputElement;
       const directoryInput = screen.getByPlaceholderText("/Users/username/projects/my-project") as HTMLInputElement;
@@ -611,9 +622,9 @@ describe("ProjectSetupModal", () => {
         target: { value: "/path/to/project" },
       });
 
-      // Toggle the embed checkbox (click it to enable embed/disable external)
-      const embedCheckbox = screen.getByRole("checkbox");
-      fireEvent.click(embedCheckbox);
+      // Toggle embed images switch (off = external storage false)
+      const switches = screen.getAllByRole("switch");
+      fireEvent.click(switches[0]);
 
       // Click Create
       fireEvent.click(screen.getByText("Create"));
@@ -884,7 +895,7 @@ describe("ProjectSetupModal", () => {
     it("should close modal when Escape is pressed", () => {
       const onClose = vi.fn();
 
-      const { container } = render(
+      render(
         <ProjectSetupModal
           isOpen={true}
           onClose={onClose}
@@ -893,8 +904,7 @@ describe("ProjectSetupModal", () => {
         />
       );
 
-      const modalDiv = container.querySelector(".bg-neutral-800");
-      fireEvent.keyDown(modalDiv!, { key: "Escape" });
+      fireEvent.keyDown(screen.getByTestId("project-setup-dialog"), { key: "Escape" });
 
       expect(onClose).toHaveBeenCalled();
     });
@@ -918,7 +928,7 @@ describe("ProjectSetupModal", () => {
 
       const onSave = vi.fn();
 
-      const { container } = render(
+      render(
         <ProjectSetupModal
           isOpen={true}
           onClose={vi.fn()}
@@ -935,8 +945,7 @@ describe("ProjectSetupModal", () => {
         target: { value: "/path/to/project" },
       });
 
-      const modalDiv = container.querySelector(".bg-neutral-800");
-      fireEvent.keyDown(modalDiv!, { key: "Enter" });
+      fireEvent.keyDown(screen.getByTestId("project-setup-dialog"), { key: "Enter" });
 
       await waitFor(() => {
         expect(onSave).toHaveBeenCalled();

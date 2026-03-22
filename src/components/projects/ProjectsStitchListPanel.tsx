@@ -1,12 +1,23 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from "react";
 import Link from "next/link";
-import { Calendar, LayoutGrid, LayoutTemplate, Search } from "lucide-react";
+import { usePathname, useRouter } from "next/navigation";
+import {
+  Calendar,
+  FolderOpen,
+  LayoutGrid,
+  LayoutTemplate,
+  MoreVertical,
+  Pencil,
+  Search,
+  Trash2,
+} from "lucide-react";
 import type { WorkflowFile } from "@/store/workflowStore";
 import { getAllPresets } from "@/lib/quickstart/templates";
 import { PRIMARY_TEMPLATE_THUMBNAILS } from "@/lib/quickstart/template-thumbnails";
-import { listProjects } from "@/lib/local-db";
+import { deleteProject, getProject, listProjects, updateProject } from "@/lib/local-db";
+import { useToast } from "@/components/Toast";
 import {
   getDefaultProjectDirectory,
   getQuickstartDefaults,
@@ -53,6 +64,22 @@ function formatListDate(iso: string | undefined): string {
 const listItemClass =
   "flex items-center justify-between gap-3 rounded-lg border border-transparent p-2 text-sm transition-colors hover:bg-state-hover active:bg-state-pressed focus-visible:-outline-offset-1 focus-visible:outline focus-visible:outline-1 focus-visible:outline-white/15";
 
+function projectHref(p: ProjectRow): string {
+  if ("source" in p && p.source === "file") return `/projects/${p.id}`;
+  return `/projects/${encodeURIComponent(p.id)}`;
+}
+
+function projectRouteSegmentMatches(pathname: string | null, p: ProjectRow): boolean {
+  if (!pathname?.startsWith("/projects/")) return false;
+  const seg = pathname.slice("/projects/".length);
+  if ("source" in p && p.source === "file") return seg === p.id;
+  try {
+    return decodeURIComponent(seg) === p.id;
+  } catch {
+    return seg === p.id;
+  }
+}
+
 function SidebarTemplateThumb({ presetId }: { presetId: string }) {
   const [failed, setFailed] = useState(false);
   const src = PRIMARY_TEMPLATE_THUMBNAILS[presetId];
@@ -87,6 +114,11 @@ export function ProjectsStitchListPanel({
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [templateLoadingId, setTemplateLoadingId] = useState<string | null>(null);
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const router = useRouter();
+  const pathname = usePathname();
+  const { show } = useToast();
 
   const presets = useMemo(() => getAllPresets(), []);
 
@@ -127,6 +159,23 @@ export function ProjectsStitchListPanel({
     void loadProjects();
   }, [loadProjects]);
 
+  useEffect(() => {
+    if (!menuOpenId) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = menuRef.current;
+      if (el && !el.contains(e.target as Node)) setMenuOpenId(null);
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setMenuOpenId(null);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [menuOpenId]);
+
   const filteredProjects = useMemo(() => {
     const q = searchValue.trim().toLowerCase();
     if (!q) return projects;
@@ -153,6 +202,66 @@ export function ProjectsStitchListPanel({
   };
   const model: LLMModelType = quickstartDefaults?.model ?? defaultModels[provider];
   const systemInstructionExtra = getQuickstartSystemInstructionExtra();
+
+  const handleDeleteProject = async (p: ProjectRow) => {
+    if (!confirm("Delete this project? This cannot be undone.")) return;
+    const isFile = "source" in p && p.source === "file";
+    try {
+      if (isFile && "path" in p) {
+        const res = await fetch(`/api/projects/delete?path=${encodeURIComponent(p.path)}`, {
+          method: "DELETE",
+        });
+        const data = (await res.json()) as { success?: boolean; error?: string };
+        if (!data.success) throw new Error(data.error || "Failed to delete");
+        setProjects((prev) =>
+          prev.filter((row) => {
+            if ("path" in p) {
+              return !("path" in row) || row.path !== p.path;
+            }
+            return row.id !== p.id;
+          })
+        );
+      } else {
+        await deleteProject(p.id);
+        setProjects((prev) => prev.filter((row) => row.id !== p.id));
+      }
+      if (projectRouteSegmentMatches(pathname, p)) router.push("/projects");
+      show("Project deleted", "success");
+      setMenuOpenId(null);
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Failed to delete project", "error");
+    }
+  };
+
+  const handleRenameProject = async (p: ProjectRow) => {
+    const currentName = p.name || "Untitled";
+    const nextName = window.prompt("Rename project", currentName)?.trim();
+    if (!nextName || nextName === currentName) return;
+    const isFile = "source" in p && p.source === "file";
+    try {
+      if (isFile && "path" in p) {
+        const res = await fetch("/api/projects/rename", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ path: p.path, newName: nextName }),
+        });
+        const data = (await res.json()) as { success?: boolean; error?: string };
+        if (!data.success) throw new Error(data.error || "Failed to rename");
+      } else {
+        const existing = await getProject(p.id);
+        if (!existing) throw new Error("Project not found");
+        await updateProject(p.id, {
+          name: nextName,
+          content: { ...existing.content, name: nextName },
+        });
+      }
+      await loadProjects();
+      show("Renamed successfully", "success");
+      setMenuOpenId(null);
+    } catch (error) {
+      show(error instanceof Error ? error.message : "Failed to rename", "error");
+    }
+  };
 
   const runTemplate = async (templateId: string) => {
     setTemplateLoadingId(templateId);
@@ -263,39 +372,95 @@ export function ProjectsStitchListPanel({
                         "source" in p && p.source === "file"
                           ? (p.thumbnail ?? "/thumbnail.jpeg")
                           : (p as LocalProject).image ?? "/thumbnail.jpeg";
-                      const href = `/projects/${encodeURIComponent(p.id)}`;
+                      const href = projectHref(p);
                       const designVar = designRgbFromId(p.id);
+                      const menuOpen = menuOpenId === p.id;
                       return (
-                        <li key={p.id} className="list-none">
-                          <Link href={href} className={listItemClass}>
-                            <div>
-                              <div
-                                className="group relative flex justify-center rounded-lg bg-design opacity-100 shadow-md"
-                                style={
-                                  {
-                                    "--backgroundColor-design": designVar,
-                                  } as CSSProperties
-                                }
-                              >
-                                <img
-                                  src={thumb}
-                                  alt=""
-                                  className="size-10 min-w-10 flex justify-center overflow-hidden rounded-md bg-center bg-cover bg-no-repeat object-cover object-top"
-                                />
-                              </div>
-                            </div>
-                            <div className="flex min-w-0 flex-1 flex-col justify-center">
-                              <p className="line-clamp-2 font-semibold text-stitch-fg">
-                                {p.name || "Untitled"}
-                              </p>
-                              <div className="line-clamp-1 flex items-center justify-between text-xs text-stitch-muted">
-                                <div className="flex items-center gap-1 text-[10px] text-inherit">
-                                  <Calendar className="size-3 shrink-0" aria-hidden />
-                                  <span>{formatListDate(p.updatedAt)}</span>
+                        <li key={p.id} className="relative list-none">
+                          <div className={`${listItemClass} gap-2 pr-1`}>
+                            <Link href={href} className="flex min-w-0 flex-1 items-center gap-3 rounded-md outline-none">
+                              <div>
+                                <div
+                                  className="group relative flex justify-center rounded-lg bg-design opacity-100 shadow-md"
+                                  style={
+                                    {
+                                      "--backgroundColor-design": designVar,
+                                    } as CSSProperties
+                                  }
+                                >
+                                  <img
+                                    src={thumb}
+                                    alt=""
+                                    className="size-10 min-w-10 flex justify-center overflow-hidden rounded-md bg-center bg-cover bg-no-repeat object-cover object-top"
+                                  />
                                 </div>
                               </div>
+                              <div className="flex min-w-0 flex-1 flex-col justify-center">
+                                <p className="line-clamp-2 font-semibold text-stitch-fg">
+                                  {p.name || "Untitled"}
+                                </p>
+                                <div className="line-clamp-1 flex items-center justify-between text-xs text-stitch-muted">
+                                  <div className="flex items-center gap-1 text-[10px] text-inherit">
+                                    <Calendar className="size-3 shrink-0" aria-hidden />
+                                    <span>{formatListDate(p.updatedAt)}</span>
+                                  </div>
+                                </div>
+                              </div>
+                            </Link>
+                            <div className="relative shrink-0" ref={menuOpen ? menuRef : null}>
+                              <button
+                                type="button"
+                                aria-label={`More actions for ${p.name || "project"}`}
+                                aria-expanded={menuOpen}
+                                aria-haspopup="menu"
+                                onClick={(e) => {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  setMenuOpenId((id) => (id === p.id ? null : p.id));
+                                }}
+                                className="flex size-8 items-center justify-center rounded-md text-stitch-muted transition-colors hover:bg-state-hover hover:text-stitch-fg focus-visible:-outline-offset-1 focus-visible:outline focus-visible:outline-1 focus-visible:outline-white/15"
+                              >
+                                <MoreVertical className="size-4" strokeWidth={2} aria-hidden />
+                              </button>
+                              {menuOpen ? (
+                                <div
+                                  role="menu"
+                                  className="absolute right-0 top-full z-50 mt-1 min-w-[11rem] rounded-xl border border-secondary bg-surface-container py-1 shadow-lg backdrop-blur-glass"
+                                >
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-stitch-fg transition-colors hover:bg-state-hover"
+                                    onClick={() => {
+                                      setMenuOpenId(null);
+                                      router.push(href);
+                                    }}
+                                  >
+                                    <FolderOpen className="size-4 shrink-0 text-stitch-muted" aria-hidden />
+                                    Open project
+                                  </button>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-stitch-fg transition-colors hover:bg-state-hover"
+                                    onClick={() => void handleRenameProject(p)}
+                                  >
+                                    <Pencil className="size-4 shrink-0 text-stitch-muted" aria-hidden />
+                                    Rename project
+                                  </button>
+                                  <button
+                                    type="button"
+                                    role="menuitem"
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-red-400 transition-colors hover:bg-state-hover"
+                                    onClick={() => void handleDeleteProject(p)}
+                                  >
+                                    <Trash2 className="size-4 shrink-0 opacity-90" aria-hidden />
+                                    Delete project
+                                  </button>
+                                </div>
+                              ) : null}
                             </div>
-                          </Link>
+                          </div>
                         </li>
                       );
                     })}

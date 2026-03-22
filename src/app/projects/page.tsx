@@ -7,13 +7,12 @@ import type { WorkflowFile } from "@/store/workflowStore";
 import { ProjectsStitchListPanel } from "@/components/projects/ProjectsStitchListPanel";
 import { StitchProjectsHero } from "@/components/projects/StitchProjectsHero";
 import type { ProjectsViewTab } from "@/components/projects/ProjectsStickyHeader";
-import { ProjectSetupModal } from "@/components/ProjectSetupModal";
+import { NewProjectModal } from "@/components/NewProjectModal";
 import { useWorkflowStore } from "@/store/workflowStore";
 
 export default function ProjectsPage() {
   const router = useRouter();
-  const [showProjectModal, setShowProjectModal] = useState(false);
-  const [projectModalMode, setProjectModalMode] = useState<"new" | "settings">("new");
+  const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ProjectsViewTab>("templates");
   const [pendingTemplateWorkflow, setPendingTemplateWorkflow] = useState<WorkflowFile | null>(null);
@@ -24,8 +23,7 @@ export default function ProjectsPage() {
 
   const openNewProjectModal = (workflow: WorkflowFile | null) => {
     setPendingTemplateWorkflow(workflow);
-    setProjectModalMode("new");
-    setShowProjectModal(true);
+    setShowNewProjectModal(true);
   };
 
   const handleProjectSave = async (
@@ -33,7 +31,7 @@ export default function ProjectsPage() {
     name: string,
     fullProjectPath: string
   ) => {
-    setShowProjectModal(false);
+    setShowNewProjectModal(false);
     const workflowThumbnail = useWorkflowStore.getState().workflowThumbnail;
     const workflowToSave = pendingTemplateWorkflow ?? {
       version: 1 as const,
@@ -73,11 +71,10 @@ export default function ProjectsPage() {
 
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-black text-[13px] leading-[1.35] text-white antialiased [-webkit-font-smoothing:antialiased]">
-      <ProjectSetupModal
-        isOpen={showProjectModal}
-        onClose={() => setShowProjectModal(false)}
+      <NewProjectModal
+        isOpen={showNewProjectModal}
+        onClose={() => setShowNewProjectModal(false)}
         onSave={handleProjectSave}
-        mode={projectModalMode}
       />
       <div className="flex min-h-0 flex-1 overflow-hidden bg-black">
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden">

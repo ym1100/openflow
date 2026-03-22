@@ -59,7 +59,7 @@ import { getQuickstartDefaults, getQuickstartSystemInstructionExtra } from "@/st
 import { FloatingNodeHeader } from "./nodes/shared/FloatingNodeHeader";
 import { ControlPanel } from "./nodes/shared/ControlPanel";
 import { logger } from "@/utils/logger";
-import { ProjectSetupModal } from "./ProjectSetupModal";
+import { NewProjectModal } from "./NewProjectModal";
 import { FlowyAgentPanel } from "./FlowyAgentPanel";
 import { RunActionBar } from "./RunActionBar";
 import { EditOperation } from "@/lib/chat/editOperations";
@@ -1683,9 +1683,8 @@ export function WorkflowCanvas() {
 
       {/* New Project Setup Modal */}
       {showNewProjectSetup && (
-        <ProjectSetupModal
+        <NewProjectModal
           isOpen={showNewProjectSetup}
-          mode="new"
           onSave={(id, name, directoryPath) => {
             setWorkflowMetadata(id, name, directoryPath);
             setShowNewProjectSetup(false);
