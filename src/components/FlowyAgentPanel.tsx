@@ -11,7 +11,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import gsap from "gsap";
+import { motion } from "motion/react";
 import type { EditOperation } from "@/lib/chat/editOperations";
 import { executeOperationWithMouse, type OrchestratorDeps } from "@/lib/flowy/agentCanvasOrchestrator";
 import { planEdgeMatchesStoreEdge } from "@/lib/workflow/canvasConnectionRules";
@@ -681,9 +681,14 @@ function AppliedPlanWidget({ plan }: { plan: AppliedPlanRecord }) {
   );
 }
 
-const FLOWY_MORPH_COLLAPSED_PX = 44;
-const FLOWY_MORPH_RADIUS_COLLAPSED = FLOWY_MORPH_COLLAPSED_PX / 2;
+/** Collapsed launcher matches ChatGPT-style pill: 56×56, 28px radius */
+const FLOWY_MORPH_COLLAPSED_PX = 56;
+const FLOWY_MORPH_RADIUS_COLLAPSED = 28;
 const FLOWY_MORPH_RADIUS_EXPANDED = 16;
+const FLOWY_MORPH_SHADOW_COLLAPSED =
+  "0 10px 15px -3px rgba(0,0,0,0.28), 0 4px 6px -4px rgba(0,0,0,0.22)";
+const FLOWY_MORPH_SHADOW_EXPANDED =
+  "0 20px 25px -5px rgba(0,0,0,0.45), 0 8px 10px -6px rgba(0,0,0,0.35)";
 
 function getFlowyMorphExpandedSize(): { w: number; h: number } {
   if (typeof window === "undefined") return { w: 280, h: 560 };
@@ -2135,154 +2140,54 @@ export function FlowyAgentPanel({
     return () => mq.removeEventListener("change", sync);
   }, []);
 
-  const flowyMorphShellRef = useRef<HTMLDivElement>(null);
-  const flowyMorphPanelInnerRef = useRef<HTMLDivElement>(null);
-  const flowyMorphCloseRunningRef = useRef(false);
-  const prevIsOpenForMorphRef = useRef<boolean | undefined>(undefined);
-
-  const runFlowyMorphOpen = useCallback(() => {
-    const shell = flowyMorphShellRef.current;
-    const inner = flowyMorphPanelInnerRef.current;
-    if (!shell) return;
-    const { w, h } = getFlowyMorphExpandedSize();
-    gsap.killTweensOf(shell);
-    if (inner) gsap.killTweensOf(inner);
-
-    if (inner) {
-      gsap.set(inner, {
-        autoAlpha: 0,
-        scale: 0.86,
-        y: 32,
-        transformOrigin: "100% 0%",
-      });
-    }
-
-    const baseShadow = "0 8px 32px -14px rgba(0,0,0,0.55)";
-    gsap.set(shell, {
-      width: FLOWY_MORPH_COLLAPSED_PX,
-      height: FLOWY_MORPH_COLLAPSED_PX,
-      borderRadius: FLOWY_MORPH_RADIUS_COLLAPSED,
-      boxShadow: baseShadow,
-    });
-
-    const shellTl = gsap.timeline({ defaults: { overwrite: "auto" } });
-    shellTl.to(
-      shell,
-      {
-        width: w,
-        height: h,
-        borderRadius: FLOWY_MORPH_RADIUS_EXPANDED,
-        duration: 0.64,
-        ease: "back.out(1.12)",
-      },
-      0
-    );
-    const glowShadow =
-      "0 12px 44px -10px rgba(0,0,0,0.48), 0 0 44px -4px rgba(139, 92, 246, 0.34)";
-    shellTl.to(shell, { boxShadow: glowShadow, duration: 0.26, ease: "power2.out" }, 0.12);
-    shellTl.to(shell, { boxShadow: baseShadow, duration: 0.42, ease: "power3.out" }, 0.22);
-
-    if (inner) {
-      gsap.fromTo(
-        inner,
-        { autoAlpha: 0, scale: 0.86, y: 32, transformOrigin: "100% 0%" },
-        {
-          autoAlpha: 1,
-          scale: 1,
-          y: 0,
-          duration: 0.58,
-          ease: "power3.out",
-          delay: 0.08,
-          overwrite: "auto",
-          onComplete: () => {
-            gsap.set(inner, { clearProps: "transform" });
-          },
-        }
-      );
-    }
+  const [panelSize, setPanelSize] = useState(() =>
+    typeof window !== "undefined" ? getFlowyMorphExpandedSize() : { w: 280, h: 560 }
+  );
+  useEffect(() => {
+    const sync = () => setPanelSize(getFlowyMorphExpandedSize());
+    sync();
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
   }, []);
 
+  const [motionExpanded, setMotionExpanded] = useState(isOpen);
+  const pendingMorphCloseRef = useRef(false);
+
+  useLayoutEffect(() => {
+    if (isOpen) setMotionExpanded(true);
+    else setMotionExpanded(false);
+  }, [isOpen]);
+
+  const flowyMorphExpanded = isOpen && motionExpanded;
+
+  const flowyMorphSpringTransition = useMemo(
+    () =>
+      prefersReducedMotion
+        ? { duration: 0 }
+        : ({
+            type: "spring" as const,
+            stiffness: 550,
+            damping: 45,
+            mass: 0.7,
+            delay: flowyMorphExpanded ? 0 : 0.08,
+          } as const),
+    [prefersReducedMotion, flowyMorphExpanded]
+  );
+
   const handleFlowyMorphClose = useCallback(() => {
-    if (flowyMorphCloseRunningRef.current) return;
     if (prefersReducedMotion) {
       onClose();
       return;
     }
-    const shell = flowyMorphShellRef.current;
-    const inner = flowyMorphPanelInnerRef.current;
-    if (!shell) {
-      onClose();
-      return;
-    }
-    flowyMorphCloseRunningRef.current = true;
-    gsap.killTweensOf(shell);
-    if (inner) gsap.killTweensOf(inner);
-
-    const tl = gsap.timeline({
-      onComplete: () => {
-        gsap.set(shell, { clearProps: "width,height,borderRadius,boxShadow" });
-        flowyMorphCloseRunningRef.current = false;
-        onClose();
-      },
-    });
-
-    if (inner) {
-      tl.to(
-        inner,
-        {
-          autoAlpha: 0,
-          scale: 0.9,
-          y: 32,
-          transformOrigin: "100% 0%",
-          duration: 0.32,
-          ease: "power3.in",
-        },
-        0
-      );
-    }
-    tl.to(
-      shell,
-      {
-        width: FLOWY_MORPH_COLLAPSED_PX,
-        height: FLOWY_MORPH_COLLAPSED_PX,
-        borderRadius: FLOWY_MORPH_RADIUS_COLLAPSED,
-        boxShadow: "0 4px 20px -12px rgba(0,0,0,0.45)",
-        duration: 0.54,
-        ease: "power4.inOut",
-      },
-      inner ? 0.06 : 0
-    );
+    pendingMorphCloseRef.current = true;
+    setMotionExpanded(false);
   }, [onClose, prefersReducedMotion]);
 
-  useLayoutEffect(() => {
-    const wasOpen = prevIsOpenForMorphRef.current;
-    prevIsOpenForMorphRef.current = isOpen;
-    if (!isOpen) return;
-    if (prefersReducedMotion || flowyMorphCloseRunningRef.current) return;
-    if (wasOpen === true) return;
-    runFlowyMorphOpen();
-  }, [isOpen, prefersReducedMotion, runFlowyMorphOpen]);
-
-  useEffect(() => {
-    if (!isOpen || prefersReducedMotion) return;
-    const shell = flowyMorphShellRef.current;
-    const onResize = () => {
-      if (!shell || flowyMorphCloseRunningRef.current) return;
-      const { w, h } = getFlowyMorphExpandedSize();
-      gsap.to(shell, { width: w, height: h, duration: 0.22, ease: "power2.out", overwrite: "auto" });
-    };
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, [isOpen, prefersReducedMotion]);
-
-  useLayoutEffect(() => {
-    return () => {
-      const shell = flowyMorphShellRef.current;
-      const inner = flowyMorphPanelInnerRef.current;
-      if (shell) gsap.killTweensOf(shell);
-      if (inner) gsap.killTweensOf(inner);
-    };
-  }, []);
+  const onMorphShellAnimationComplete = useCallback(() => {
+    if (!pendingMorphCloseRef.current) return;
+    pendingMorphCloseRef.current = false;
+    onClose();
+  }, [onClose]);
 
   const agentLogAnchorRef = useFlowyAgentLogAnchorRef();
   const threadsMenuRef = useRef<HTMLDivElement>(null);
@@ -2574,15 +2479,18 @@ export function FlowyAgentPanel({
             document.body
           )
         : null}
-      <div
-        ref={flowyMorphShellRef}
-        className={`fixed right-5 top-4 z-[60] flex shrink-0 origin-top-right flex-col overflow-hidden ${
-          isOpen
-            ? prefersReducedMotion
-              ? "h-[calc(100dvh-2rem-min(20vh,464px))] w-[min(280px,calc(100vw-2rem))] max-w-[calc(100vw-2rem)] rounded-2xl border border-white/[0.14] bg-[rgb(22,23,24)]/95 shadow-[0_8px_32px_-14px_rgba(0,0,0,0.55)] backdrop-blur-xl"
-              : "min-h-11 min-w-11 max-w-[min(280px,calc(100vw-2rem))] rounded-2xl border border-white/[0.14] bg-[rgb(22,23,24)]/95 shadow-[0_8px_32px_-14px_rgba(0,0,0,0.55)] backdrop-blur-xl"
-            : "h-11 w-11 rounded-full border border-neutral-700 bg-background-transparent-black-default backdrop-blur-[16px]"
-        }`}
+      <motion.div
+        initial={false}
+        className="fixed right-5 top-4 z-[60] flex max-w-[min(280px,calc(100vw-2rem))] shrink-0 origin-top-right flex-col overflow-hidden border border-white/[0.14] bg-[rgb(22,23,24)]/95 backdrop-blur-xl data-[fab]:border-neutral-700 data-[fab]:bg-[rgb(22,23,24)]/92 data-[fab]:backdrop-blur-[16px]"
+        data-fab={!isOpen || !flowyMorphExpanded ? true : undefined}
+        animate={{
+          width: flowyMorphExpanded ? panelSize.w : FLOWY_MORPH_COLLAPSED_PX,
+          height: flowyMorphExpanded ? panelSize.h : FLOWY_MORPH_COLLAPSED_PX,
+          borderRadius: flowyMorphExpanded ? FLOWY_MORPH_RADIUS_EXPANDED : FLOWY_MORPH_RADIUS_COLLAPSED,
+          boxShadow: flowyMorphExpanded ? FLOWY_MORPH_SHADOW_EXPANDED : FLOWY_MORPH_SHADOW_COLLAPSED,
+        }}
+        transition={flowyMorphSpringTransition}
+        onAnimationComplete={onMorphShellAnimationComplete}
       >
         {!isOpen ? (
           <button
@@ -2590,12 +2498,12 @@ export function FlowyAgentPanel({
             onClick={() => setFlowyAgentOpen(true)}
             title="Flowy agent"
             aria-label="Open Flowy agent"
-            className="group flex h-full w-full shrink-0 items-center justify-center rounded-full outline-none transition-[transform,background-color] duration-200 ease-out hover:bg-neutral-800 active:scale-[0.94] motion-reduce:active:scale-100 focus-visible:ring-2 focus-visible:ring-white/30"
+            className="group flex h-full w-full shrink-0 items-center justify-center rounded-[28px] outline-none transition-[transform,background-color] duration-200 ease-out hover:bg-white/[0.06] active:scale-[0.94] motion-reduce:active:scale-100 focus-visible:ring-2 focus-visible:ring-white/30"
           >
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              width="20"
-              height="20"
+              width="22"
+              height="22"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -2610,13 +2518,16 @@ export function FlowyAgentPanel({
             </svg>
           </button>
         ) : (
-          <div
-            ref={flowyMorphPanelInnerRef}
+          <motion.div
             role="dialog"
             aria-modal="true"
             aria-label="Flowy AI chat"
             data-testid="flowy-sidebar"
+            initial={false}
+            animate={{ opacity: flowyMorphExpanded ? 1 : 0 }}
+            transition={flowyMorphSpringTransition}
             className="pointer-events-auto flex min-h-0 min-w-0 flex-1 basis-0 flex-col overflow-hidden pb-3"
+            style={{ pointerEvents: flowyMorphExpanded ? "auto" : "none" }}
           >
       <div className="flex shrink-0 flex-col">
         <div className="h-3 shrink-0" aria-hidden />
@@ -3080,9 +2991,9 @@ export function FlowyAgentPanel({
           )}
         </div>
       </div>
-    </div>
+    </motion.div>
         )}
-      </div>
+      </motion.div>
 
       {/* Custom instructions modal */}
       {isSettingsOpen && (
