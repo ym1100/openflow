@@ -24,7 +24,6 @@ export function RunActionBar() {
   })));
 
   const [runMenuOpen, setRunMenuOpen] = useState(false);
-  const [isHovered, setIsHovered] = useState(false);
   const runMenuRef = useRef<HTMLDivElement>(null);
   const { valid, errors } = validateWorkflow();
 
@@ -75,14 +74,11 @@ export function RunActionBar() {
 
   return (
     <div
-      className="fixed bottom-0 left-1/2 z-10 -translate-x-1/2 flex justify-center items-end pb-2 min-h-[72px] min-w-[140px] transition-opacity duration-300"
-      style={{ opacity: isHovered ? 1 : 0 }}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
+      className="absolute bottom-3 left-[52px] z-[30] flex items-end min-h-[52px] min-w-[140px] pointer-events-none"
       data-id="run-action-bar"
     >
       <div
-        className="flex items-center gap-0.5 rounded-lg p-1.5 backdrop-blur-[16px]"
+        className="pointer-events-auto flex items-center gap-0.5 rounded-lg p-1.5 backdrop-blur-[16px]"
         style={{ backgroundColor: "var(--background-transparent-black-default)" }}
       >
         <div className="relative flex items-center" ref={runMenuRef}>
@@ -116,7 +112,7 @@ export function RunActionBar() {
           )}
 
           {runMenuOpen && !isRunning && (
-            <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl overflow-hidden min-w-[180px] z-[100]">
+            <div className="absolute bottom-full left-0 mb-2 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl overflow-hidden min-w-[180px] z-[100]">
               <button
                 onClick={() => { executeWorkflow(); setRunMenuOpen(false); }}
                 className="w-full px-3 py-2 text-left text-[11px] font-medium text-neutral-300 hover:bg-neutral-700 hover:text-neutral-100 transition-colors flex items-center gap-2"

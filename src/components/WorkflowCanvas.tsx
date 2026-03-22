@@ -52,6 +52,7 @@ import { ControlPanel } from "./nodes/shared/ControlPanel";
 import { logger } from "@/utils/logger";
 import { ProjectSetupModal } from "./ProjectSetupModal";
 import { FlowyAgentPanel } from "./FlowyAgentPanel";
+import { RunActionBar } from "./RunActionBar";
 import { EditOperation } from "@/lib/chat/editOperations";
 import { stripBinaryData } from "@/lib/chat/contextBuilder";
 import { PromptEditorModal } from "./modals/PromptEditorModal";
@@ -218,6 +219,7 @@ export function WorkflowCanvas() {
   const [isChatOpen, setIsChatOpen] = useState(false);
   /** True while Flowy is sending canvas/workflow context to the planner (edge vignette on canvas). */
   const [isFlowyCanvasReading, setIsFlowyCanvasReading] = useState(false);
+  const [flowyComposerMountEl, setFlowyComposerMountEl] = useState<HTMLDivElement | null>(null);
   const [isBuildingWorkflow, setIsBuildingWorkflow] = useState(false);
   const [showNewProjectSetup, setShowNewProjectSetup] = useState(false);
   const [expandingNode, setExpandingNode] = useState<{ id: string; type: string } | null>(null);
@@ -1747,6 +1749,15 @@ export function WorkflowCanvas() {
         </ViewportPortal>
       </ReactFlow>
 
+      <RunActionBar />
+
+      {/* Flowy chat composer — portaled from FlowyAgentPanel; always visible at bottom center */}
+      <div
+        ref={setFlowyComposerMountEl}
+        className="pointer-events-none absolute inset-x-0 bottom-0 z-[45] flex justify-center px-4 pb-3 pt-8"
+        role="presentation"
+      />
+
       {/* Inward edge glow while Flowy reads/sends canvas state to the agent */}
       <div
         className={`pointer-events-none absolute inset-0 z-[25] transition-opacity duration-500 ease-out ${
@@ -1820,6 +1831,7 @@ export function WorkflowCanvas() {
         workflowState={chatWorkflowState}
         selectedNodeIds={selectedNodeIds}
         onCanvasReadingChange={setIsFlowyCanvasReading}
+        composerMountEl={flowyComposerMountEl}
       />
 
       {/* Control panel - renders on right side when a configurable node is selected */}

@@ -6,7 +6,6 @@ import { ReactFlowProvider } from "@xyflow/react";
 import { Header } from "@/components/Header";
 import { WorkflowCanvas } from "@/components/WorkflowCanvas";
 import { FloatingActionBar } from "@/components/FloatingActionBar";
-import { RunActionBar } from "@/components/RunActionBar";
 import { AnnotationModal } from "@/components/AnnotationModal";
 import { MediaViewerProvider } from "@/providers/media-viewer";
 import { MediaViewer } from "@/components/MediaViewer";
@@ -115,7 +114,6 @@ export default function ProjectPage({ params }: ProjectPageProps) {
           <Header />
           <WorkflowCanvas />
           <FloatingActionBar />
-          <RunActionBar />
           <AnnotationModal />
         </div>
         <MediaViewer />

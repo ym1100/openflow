@@ -1,5 +1,5 @@
 /**
- * Persist Flowy agent panel UI state (chat sessions, dock, custom instructions).
+ * Persist Flowy agent panel UI state (chat sessions, custom instructions).
  */
 
 export const FLOWY_SESSIONS_KEY = "openflows-flowy-sessions";
