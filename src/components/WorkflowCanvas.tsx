@@ -4,6 +4,8 @@ import { useCallback, useRef, useState, useEffect, DragEvent, useMemo } from "re
 import {
   ReactFlow,
   Controls,
+  Background,
+  BackgroundVariant,
   NodeTypes,
   EdgeTypes,
   Connection,
@@ -1718,6 +1720,14 @@ export function WorkflowCanvas() {
         proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={defaultEdgeOptions}
       >
+        <Background
+          id="workflow-canvas-dots"
+          variant={BackgroundVariant.Dots}
+          gap={20}
+          size={1.35}
+          color="rgb(255 255 255 / 0.28)"
+          bgColor="transparent"
+        />
         <SharedEdgeGradients />
         <GroupBackgroundsPortal />
         <GroupControlsOverlay />
