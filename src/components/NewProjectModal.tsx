@@ -5,46 +5,13 @@ import { X } from "lucide-react";
 import { generateWorkflowId, useWorkflowStore } from "@/store/workflowStore";
 import { getDefaultProjectDirectory } from "@/store/utils/localStorage";
 import { useInlineParameters } from "@/hooks/useInlineParameters";
+import { ensureProjectSubfolderPath } from "@/lib/project-directory-path";
 
 export type NewProjectModalProps = {
   isOpen: boolean;
   onClose: () => void;
   onSave: (id: string, name: string, directoryPath: string) => void;
 };
-
-function sanitizeProjectFolderName(projectName: string): string {
-  return projectName
-    .trim()
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "_")
-    .replace(/\.+$/g, "")
-    .trim();
-}
-
-function joinPathForPlatform(basePath: string, folderName: string): string {
-  const trimmedBase = basePath.trim();
-  const separator = /^[A-Za-z]:[\\/]/.test(trimmedBase) || trimmedBase.startsWith("\\\\") ? "\\" : "/";
-  const endsWithSeparator = trimmedBase.endsWith("/") || trimmedBase.endsWith("\\");
-  return `${trimmedBase}${endsWithSeparator ? "" : separator}${folderName}`;
-}
-
-function getPathBasename(fullPath: string): string {
-  const withoutTrailingSeparator = fullPath.trim().replace(/[\\/]+$/, "");
-  const parts = withoutTrailingSeparator.split(/[\\/]/);
-  return parts[parts.length - 1] || "";
-}
-
-function ensureProjectSubfolderPath(basePath: string, projectName: string): string {
-  const trimmedBase = basePath.trim();
-  const sanitizedFolder = sanitizeProjectFolderName(projectName);
-  if (!sanitizedFolder) return trimmedBase;
-
-  const basename = getPathBasename(trimmedBase);
-  if (basename.toLowerCase() === sanitizedFolder.toLowerCase()) {
-    return trimmedBase;
-  }
-
-  return joinPathForPlatform(trimmedBase, sanitizedFolder);
-}
 
 export function NewProjectModal({ isOpen, onClose, onSave }: NewProjectModalProps) {
   const workflowThumbnail = useWorkflowStore((s) => s.workflowThumbnail);

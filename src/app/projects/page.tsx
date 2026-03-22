@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { WorkflowFile } from "@/store/workflowStore";
@@ -9,9 +9,14 @@ import { StitchProjectsHero } from "@/components/projects/StitchProjectsHero";
 import type { ProjectsViewTab } from "@/components/projects/ProjectsStickyHeader";
 import { NewProjectModal } from "@/components/NewProjectModal";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useToast } from "@/components/Toast";
+import { createProject, updateProject } from "@/lib/local-db";
+import { getDefaultProjectDirectory } from "@/store/utils/localStorage";
+import { ensureProjectSubfolderPath } from "@/lib/project-directory-path";
 
 export default function ProjectsPage() {
   const router = useRouter();
+  const { show } = useToast();
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ProjectsViewTab>("templates");
@@ -20,6 +25,9 @@ export default function ProjectsPage() {
     (state) => state.setWorkflowMetadata
   );
   const loadWorkflow = useWorkflowStore((state) => state.loadWorkflow);
+  const setUseExternalImageStorage = useWorkflowStore(
+    (state) => state.setUseExternalImageStorage
+  );
 
   const openNewProjectModal = (workflow: WorkflowFile | null) => {
     setPendingTemplateWorkflow(workflow);
@@ -69,6 +77,79 @@ export default function ProjectsPage() {
     }
   };
 
+  const instantiateTemplateFromSidebar = useCallback(
+    async (
+      workflow: WorkflowFile,
+      meta: { templateId: string; name: string; thumbnailUrl: string }
+    ) => {
+      const { name, thumbnailUrl } = meta;
+      const workflowToSave: WorkflowFile = {
+        ...workflow,
+        name,
+        thumbnail: thumbnailUrl,
+      };
+      const defaultDir = getDefaultProjectDirectory();
+
+      try {
+        if (defaultDir.trim()) {
+          setUseExternalImageStorage(true);
+          const fullProjectPath = ensureProjectSubfolderPath(defaultDir, name);
+          const validateRes = await fetch(
+            `/api/workflow?path=${encodeURIComponent(fullProjectPath)}`
+          );
+          const validateJson = (await validateRes.json()) as {
+            exists?: boolean;
+            isDirectory?: boolean;
+          };
+          if (validateJson.exists && !validateJson.isDirectory) {
+            show("Project path is not a directory", "error");
+            return;
+          }
+
+          const postRes = await fetch("/api/workflow", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              directoryPath: fullProjectPath,
+              filename: name.replace(/[^a-zA-Z0-9-_]/g, "_"),
+              workflow: { ...workflowToSave, id: fullProjectPath },
+            }),
+          });
+          const postData = (await postRes.json()) as { success?: boolean; error?: string };
+          if (!postData.success) throw new Error(postData.error || "Failed to save project");
+
+          setWorkflowMetadata(fullProjectPath, name, fullProjectPath);
+          await loadWorkflow({ ...workflowToSave, id: fullProjectPath }, fullProjectPath);
+          router.push(`/projects/${encodeURIComponent(fullProjectPath)}`);
+        } else {
+          const created = await createProject({
+            name,
+            image: thumbnailUrl,
+          });
+          await updateProject(created.id, {
+            content: {
+              ...workflowToSave,
+              id: created.id,
+              name,
+              thumbnail: thumbnailUrl,
+            },
+          });
+          await loadWorkflow({
+            ...workflowToSave,
+            id: created.id,
+            name,
+            thumbnail: thumbnailUrl,
+          });
+          router.push(`/projects/${encodeURIComponent(created.id)}`);
+        }
+        show("Project created", "success");
+      } catch (err) {
+        show(err instanceof Error ? err.message : "Failed to create project", "error");
+      }
+    },
+    [loadWorkflow, router, setUseExternalImageStorage, setWorkflowMetadata, show]
+  );
+
   return (
     <div className="flex h-[100dvh] flex-col overflow-hidden bg-black text-[13px] leading-[1.35] text-white antialiased [-webkit-font-smoothing:antialiased]">
       <NewProjectModal
@@ -91,7 +172,7 @@ export default function ProjectsPage() {
             searchValue={searchQuery}
             onSearchChange={setSearchQuery}
             onNewProject={() => openNewProjectModal(null)}
-            onTemplateWorkflow={(wf) => openNewProjectModal(wf)}
+            onInstantiateTemplate={instantiateTemplateFromSidebar}
           />
           <main className="flowy-chat-scrollbar flex min-h-0 flex-1 flex-col overflow-y-auto bg-black [scrollbar-width:thin]">
             <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center px-8 py-[15dvh] sm:px-10">

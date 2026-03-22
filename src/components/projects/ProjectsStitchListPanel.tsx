@@ -36,7 +36,11 @@ type ProjectsStitchListPanelProps = {
   searchValue: string;
   onSearchChange: (v: string) => void;
   onNewProject: () => void;
-  onTemplateWorkflow: (workflow: WorkflowFile) => void;
+  /** Create project immediately (sidebar templates): preset display name + primary thumbnail. */
+  onInstantiateTemplate: (
+    workflow: WorkflowFile,
+    meta: { templateId: string; name: string; thumbnailUrl: string }
+  ) => Promise<void>;
 };
 
 function designRgbFromId(id: string): string {
@@ -109,7 +113,7 @@ export function ProjectsStitchListPanel({
   searchValue,
   onSearchChange,
   onNewProject,
-  onTemplateWorkflow,
+  onInstantiateTemplate,
 }: ProjectsStitchListPanelProps) {
   const [projects, setProjects] = useState<ProjectRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -263,7 +267,7 @@ export function ProjectsStitchListPanel({
     }
   };
 
-  const runTemplate = async (templateId: string) => {
+  const runTemplate = async (templateId: string, templateDisplayName: string) => {
     setTemplateLoadingId(templateId);
     try {
       const res = await fetch("/api/quickstart", {
@@ -278,10 +282,17 @@ export function ProjectsStitchListPanel({
         }),
       });
       const result = await res.json();
-      if (!result.success) throw new Error(result.error || "Failed");
-      if (result.workflow) onTemplateWorkflow(result.workflow as WorkflowFile);
-    } catch {
-      // ignore; parent could toast later
+      if (!result.success) throw new Error(result.error || "Failed to load template");
+      if (!result.workflow) throw new Error("No workflow returned");
+      const thumbnailUrl =
+        PRIMARY_TEMPLATE_THUMBNAILS[templateId] ?? "/thumbnail.jpeg";
+      await onInstantiateTemplate(result.workflow as WorkflowFile, {
+        templateId,
+        name: templateDisplayName,
+        thumbnailUrl,
+      });
+    } catch (err) {
+      show(err instanceof Error ? err.message : "Failed to create from template", "error");
     } finally {
       setTemplateLoadingId(null);
     }
@@ -480,7 +491,7 @@ export function ProjectsStitchListPanel({
                       <button
                         type="button"
                         disabled={templateLoadingId !== null}
-                        onClick={() => void runTemplate(preset.id)}
+                        onClick={() => void runTemplate(preset.id, preset.name)}
                         className={`${listItemClass} w-full text-left disabled:opacity-50`}
                       >
                         <SidebarTemplateThumb presetId={preset.id} />
