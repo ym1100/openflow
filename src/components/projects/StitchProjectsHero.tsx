@@ -75,36 +75,29 @@ export function StitchProjectsHero({ onWorkflowGenerated }: StitchProjectsHeroPr
       </div>
 
       <div className="rounded-2xl border border-secondary bg-surface-container p-4 shadow-none backdrop-blur-glass">
-        <textarea
-          value={prompt}
-          onChange={(e) => {
-            setPrompt(e.target.value);
-            setError(null);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              if (!isGenerating) void submit();
-            }
-          }}
-          disabled={isGenerating}
-          rows={5}
-          placeholder="Describe nodes, inputs, and what you want to generate or edit…"
-          className="min-h-[120px] w-full resize-none border-0 bg-transparent text-sm text-stitch-fg outline-none placeholder:text-stitch-muted disabled:opacity-50"
-        />
-
-        {error && (
-          <p className="mt-2 text-xs text-red-400" role="alert">
-            {error}
-          </p>
-        )}
-
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-3 border-t border-white/10 pt-3">
+        <div className="relative">
+          <textarea
+            value={prompt}
+            onChange={(e) => {
+              setPrompt(e.target.value);
+              setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                if (!isGenerating) void submit();
+              }
+            }}
+            disabled={isGenerating}
+            rows={5}
+            placeholder="Describe nodes, inputs, and what you want to generate or edit…"
+            className="min-h-[120px] w-full resize-none border-0 bg-transparent pb-12 pr-14 text-sm text-stitch-fg outline-none placeholder:text-stitch-muted disabled:opacity-50"
+          />
           <button
             type="button"
             onClick={() => void submit()}
             disabled={isGenerating || prompt.trim().length < 3}
-            className="flex size-10 shrink-0 items-center justify-center rounded-full bg-stitch-fg text-neutral-950 transition-colors hover:bg-[#e8eaed] disabled:cursor-not-allowed disabled:opacity-35"
+            className="absolute bottom-0 right-0 flex size-10 shrink-0 items-center justify-center rounded-full bg-stitch-fg text-neutral-950 transition-colors hover:bg-[#e8eaed] disabled:cursor-not-allowed disabled:opacity-35"
             title="Generate workflow"
             aria-label="Generate workflow"
           >
@@ -115,6 +108,12 @@ export function StitchProjectsHero({ onWorkflowGenerated }: StitchProjectsHeroPr
             )}
           </button>
         </div>
+
+        {error ? (
+          <p className="mt-2 text-xs text-red-400" role="alert">
+            {error}
+          </p>
+        ) : null}
       </div>
 
       <div className="flex flex-wrap gap-2">
