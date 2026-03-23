@@ -14,6 +14,7 @@ import { useWorkflowStore } from "@/store/workflowStore";
 import { getProject } from "@/lib/local-db";
 import { ProjectSync } from "@/components/projects/ProjectSync";
 import { isFileProjectId } from "@/lib/project-types";
+import { loadQueuedFlowyStartPrompt } from "@/lib/flowy/flowyPanelStorage";
 
 type ProjectPageProps = {
   params: Promise<{ id: string }>;
@@ -30,6 +31,7 @@ export default function ProjectPage({ params }: ProjectPageProps) {
     (state) => state.initializeAutoSave
   );
   const cleanupAutoSave = useWorkflowStore((state) => state.cleanupAutoSave);
+  const setFlowyAgentOpen = useWorkflowStore((state) => state.setFlowyAgentOpen);
 
   useEffect(() => {
     const load = async () => {
@@ -68,6 +70,13 @@ export default function ProjectPage({ params }: ProjectPageProps) {
     };
     load();
   }, [projectId, loadWorkflow]);
+
+  useEffect(() => {
+    if (loading || notFound) return;
+    const scopeId = decodeURIComponent(projectId);
+    const queued = loadQueuedFlowyStartPrompt(scopeId);
+    if (queued) setFlowyAgentOpen(true);
+  }, [loading, notFound, projectId, setFlowyAgentOpen]);
 
   useEffect(() => {
     initializeAutoSave();

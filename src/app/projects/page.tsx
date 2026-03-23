@@ -14,6 +14,7 @@ import { useToast } from "@/components/Toast";
 import { createProject, updateProject } from "@/lib/local-db";
 import { getDefaultProjectDirectory } from "@/store/utils/localStorage";
 import { ensureProjectSubfolderPath } from "@/lib/project-directory-path";
+import { saveQueuedFlowyStartPrompt } from "@/lib/flowy/flowyPanelStorage";
 
 const DISCORD_INVITE_URL = "https://discord.com/invite/89Nr6EKkTf";
 /** Replace with your X (Twitter) profile or community URL */
@@ -60,7 +61,11 @@ export default function ProjectsPage() {
   };
 
   const createInDefaultDirectory = useCallback(
-    async (workflow: WorkflowFile | null, name = UNTITLED_NAME): Promise<boolean> => {
+    async (
+      workflow: WorkflowFile | null,
+      name = UNTITLED_NAME,
+      queuedAgentPrompt?: string
+    ): Promise<boolean> => {
       const defaultDir = getDefaultProjectDirectory().trim();
       if (!defaultDir) return false;
       try {
@@ -103,6 +108,9 @@ export default function ProjectsPage() {
         });
         const postData = (await postRes.json()) as { success?: boolean; error?: string };
         if (!postData.success) throw new Error(postData.error || "Failed to create project");
+        if (queuedAgentPrompt?.trim()) {
+          saveQueuedFlowyStartPrompt(queuedAgentPrompt.trim(), fullProjectPath);
+        }
 
         setWorkflowMetadata(fullProjectPath, name, fullProjectPath);
         await loadWorkflow(payloadWorkflow, fullProjectPath);
@@ -293,9 +301,13 @@ export default function ProjectsPage() {
             <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col items-center px-8 py-[15dvh] sm:px-10">
               <div className="flex w-full flex-1 flex-col items-center justify-center">
                 <StitchProjectsHero
-                  onWorkflowGenerated={async (wf) => {
-                    const created = await createInDefaultDirectory(wf, UNTITLED_NAME);
-                    if (!created) openNewProjectModal(wf);
+                  onPromptSubmitted={async (agentPrompt) => {
+                    const created = await createInDefaultDirectory(
+                      null,
+                      UNTITLED_NAME,
+                      agentPrompt
+                    );
+                    if (!created) openNewProjectModal(null);
                   }}
                 />
               </div>

@@ -54,6 +54,7 @@ import {
   loadFlowyPanelSessions,
   loadFlowyPlannerLlm,
   loadRequireCautionApproval,
+  popQueuedFlowyStartPrompt,
   loadStyleMemory,
   saveCanvasStateMemory,
   saveCustomInstructions,
@@ -1744,6 +1745,14 @@ export function FlowyAgentPanel({
     await requestPlan(trimmed, { forkNewThread: true, contextSessionId });
     setImageAttachments([]);
   }, [continuationSourceSessionId, input, requestPlan]);
+
+  useEffect(() => {
+    if (!storageReady || isPlanning) return;
+    const queued = popQueuedFlowyStartPrompt(sessionScopeId);
+    if (!queued) return;
+    setInput("");
+    void requestPlan(queued, { forkNewThread: true });
+  }, [storageReady, isPlanning, sessionScopeId, requestPlan]);
 
   const handleSuggestNextStep = useCallback(() => {
     void requestPlan(

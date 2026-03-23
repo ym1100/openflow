@@ -13,6 +13,7 @@ export const FLOWY_ENFORCE_CANVAS_CONTROL_KEY = "openflows-flowy-enforce-canvas-
 export const FLOWY_REQUIRE_CAUTION_APPROVAL_KEY = "openflows-flowy-require-caution-approval";
 export const FLOWY_STYLE_MEMORY_KEY = "openflows-flowy-style-memory";
 export const FLOWY_CANVAS_STATE_MEMORY_KEY = "openflows-flowy-canvas-state-memory";
+export const FLOWY_QUEUED_START_PROMPT_KEY = "openflows-flowy-queued-start-prompt";
 
 export const FLOWY_MAX_STORED_SESSIONS = 50;
 
@@ -50,6 +51,41 @@ export type StoredChatSession = {
 function _scopedKey(baseKey: string, scopeId?: string | null): string {
   const cleanScope = typeof scopeId === "string" ? scopeId.trim() : "";
   return cleanScope ? `${baseKey}:${cleanScope}` : baseKey;
+}
+
+export function loadQueuedFlowyStartPrompt(scopeId?: string | null): string {
+  if (typeof window === "undefined") return "";
+  try {
+    const raw = localStorage.getItem(_scopedKey(FLOWY_QUEUED_START_PROMPT_KEY, scopeId));
+    return (raw ?? "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export function saveQueuedFlowyStartPrompt(prompt: string, scopeId?: string | null): void {
+  if (typeof window === "undefined") return;
+  const text = prompt.trim();
+  try {
+    if (!text) {
+      localStorage.removeItem(_scopedKey(FLOWY_QUEUED_START_PROMPT_KEY, scopeId));
+      return;
+    }
+    localStorage.setItem(_scopedKey(FLOWY_QUEUED_START_PROMPT_KEY, scopeId), text);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function popQueuedFlowyStartPrompt(scopeId?: string | null): string {
+  const text = loadQueuedFlowyStartPrompt(scopeId);
+  if (typeof window === "undefined") return text;
+  try {
+    localStorage.removeItem(_scopedKey(FLOWY_QUEUED_START_PROMPT_KEY, scopeId));
+  } catch {
+    /* ignore */
+  }
+  return text;
 }
 
 export function createEmptyFlowySession(): StoredChatSession {

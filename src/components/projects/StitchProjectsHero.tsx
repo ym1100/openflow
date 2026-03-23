@@ -2,9 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { ArrowUp, Loader2 } from "lucide-react";
-import type { WorkflowFile } from "@/store/workflowStore";
-import { getQuickstartDefaults, getQuickstartSystemInstructionExtra } from "@/store/utils/localStorage";
-import type { LLMModelType, LLMProvider } from "@/types";
+import { getQuickstartSystemInstructionExtra } from "@/store/utils/localStorage";
 
 const SUGGESTIONS = [
   "Product shots with consistent lighting from one reference image",
@@ -14,39 +12,14 @@ const SUGGESTIONS = [
 ];
 
 type StitchProjectsHeroProps = {
-  onWorkflowGenerated: (workflow: WorkflowFile) => void;
+  onPromptSubmitted: (prompt: string) => Promise<void> | void;
 };
 
-export function StitchProjectsHero({ onWorkflowGenerated }: StitchProjectsHeroProps) {
+export function StitchProjectsHero({ onPromptSubmitted }: StitchProjectsHeroProps) {
   const [prompt, setPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const quickstartDefaults = getQuickstartDefaults();
-  const provider: LLMProvider = quickstartDefaults?.provider ?? "google";
-  const defaultModels: Record<LLMProvider, LLMModelType> = {
-    google: "gemini-3-flash-preview",
-    openai: "gpt-4.1-mini",
-    anthropic: "claude-sonnet-4.5",
-  };
-  const model: LLMModelType = quickstartDefaults?.model ?? defaultModels[provider];
   const systemInstructionExtra = getQuickstartSystemInstructionExtra();
-
-  const resolveBackendPlannerConfig = useCallback((): { provider: "google" | "openai"; model: string } => {
-    if (provider === "openai") {
-      return { provider: "openai", model: model === "gpt-4.1-nano" ? "gpt-4.1-nano" : "gpt-4.1-mini" };
-    }
-    return {
-      provider: "google",
-      model:
-        model === "gemini-2.5-flash" ||
-        model === "gemini-3-flash-preview" ||
-        model === "gemini-3-pro-preview" ||
-        model === "gemini-3.1-pro-preview"
-          ? model
-          : "gemini-3-flash-preview",
-    };
-  }, [model, provider]);
 
   const submit = useCallback(async () => {
     const text = prompt.trim();
@@ -57,44 +30,17 @@ export function StitchProjectsHero({ onWorkflowGenerated }: StitchProjectsHeroPr
     setError(null);
     setIsGenerating(true);
     try {
-      const planner = resolveBackendPlannerConfig();
       const userMessage = systemInstructionExtra?.trim()
         ? `${text}\n\nAdditional instructions:\n${systemInstructionExtra.trim()}`
         : text;
-      const response = await fetch("/api/flowy/orchestrate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: userMessage,
-          workflowState: { nodes: [], edges: [], groups: {} },
-          selectedNodeIds: [],
-          provider: planner.provider,
-          model: planner.model,
-          autoApply: true,
-          maxIterations: 3,
-        }),
-      });
-      const result = await response.json();
-      if (!result.ok) throw new Error(result.error || "Failed to generate workflow");
-      const state = result.finalWorkflowState as { nodes?: unknown[]; edges?: unknown[]; groups?: Record<string, unknown> } | undefined;
-      if (!state) throw new Error("No workflow state returned");
-      const generatedWorkflow: WorkflowFile = {
-        version: 1,
-        id: `wf_${Date.now()}_flowy`,
-        name: "untitled",
-        nodes: Array.isArray(state.nodes) ? (state.nodes as WorkflowFile["nodes"]) : [],
-        edges: Array.isArray(state.edges) ? (state.edges as WorkflowFile["edges"]) : [],
-        groups: (state.groups ?? {}) as WorkflowFile["groups"],
-        edgeStyle: "angular",
-      };
-      onWorkflowGenerated(generatedWorkflow);
+      await onPromptSubmitted(userMessage);
       setPrompt("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
       setIsGenerating(false);
     }
-  }, [prompt, systemInstructionExtra, onWorkflowGenerated, resolveBackendPlannerConfig]);
+  }, [prompt, systemInstructionExtra, onPromptSubmitted]);
 
   return (
     <div className="flex w-full max-w-2xl flex-col gap-8">
