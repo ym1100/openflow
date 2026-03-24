@@ -3,12 +3,13 @@
 import { useCallback, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen } from "lucide-react";
+import { BookOpen, Settings } from "lucide-react";
 import type { WorkflowFile } from "@/store/workflowStore";
 import { ProjectsStitchListPanel } from "@/components/projects/ProjectsStitchListPanel";
 import { StitchProjectsHero } from "@/components/projects/StitchProjectsHero";
 import type { ProjectsViewTab } from "@/components/projects/ProjectsStickyHeader";
 import { NewProjectModal } from "@/components/NewProjectModal";
+import { ProjectSetupModal } from "@/components/ProjectSetupModal";
 import { useWorkflowStore } from "@/store/workflowStore";
 import { useToast } from "@/components/Toast";
 import { createProject, updateProject } from "@/lib/local-db";
@@ -42,6 +43,7 @@ export default function ProjectsPage() {
   const router = useRouter();
   const { show } = useToast();
   const [showNewProjectModal, setShowNewProjectModal] = useState(false);
+  const [showSettingsModal, setShowSettingsModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeTab, setActiveTab] = useState<ProjectsViewTab>("templates");
   const [pendingTemplateWorkflow, setPendingTemplateWorkflow] = useState<WorkflowFile | null>(null);
@@ -181,16 +183,33 @@ export default function ProjectsPage() {
         onClose={() => setShowNewProjectModal(false)}
         onSave={handleProjectSave}
       />
+      <ProjectSetupModal
+        isOpen={showSettingsModal}
+        onClose={() => setShowSettingsModal(false)}
+        onSave={(id, name, path) => setWorkflowMetadata(id, name, path)}
+        mode="settings"
+      />
       <div className="flex min-h-0 flex-1 overflow-hidden bg-black">
         <div className="relative flex min-h-0 min-w-0 flex-1 overflow-hidden bg-black">
-          <Link
-            href="/projects"
-            className="absolute left-4 top-4 z-10 flex items-center gap-2 rounded-xl py-1.5 pl-1.5 pr-2 transition-colors hover:bg-white/[0.06] sm:left-6 sm:top-5"
-            title="Openflows"
-          >
-            <img src="/logo.png" alt="" className="size-7 shrink-0 object-contain opacity-95" />
-            <span className="select-none text-[11px] font-medium text-stitch-muted">Alpha</span>
-          </Link>
+          <div className="absolute left-4 top-4 z-10 flex items-center gap-1 sm:left-6 sm:top-5">
+            <Link
+              href="/projects"
+              className="flex items-center gap-2 rounded-xl py-1.5 pl-1.5 pr-2 transition-colors hover:bg-white/[0.06]"
+              title="Openflows"
+            >
+              <img src="/logo.png" alt="" className="size-7 shrink-0 object-contain opacity-95" />
+              <span className="select-none text-[11px] font-medium text-stitch-muted">Alpha</span>
+            </Link>
+            <button
+              type="button"
+              onClick={() => setShowSettingsModal(true)}
+              title="Open settings"
+              aria-label="Open settings"
+              className="inline-flex size-9 items-center justify-center rounded-xl text-stitch-muted transition-colors hover:bg-white/[0.06] hover:text-stitch-fg focus-visible:-outline-offset-1 focus-visible:outline focus-visible:outline-1 focus-visible:outline-white/15"
+            >
+              <Settings className="size-4.5" strokeWidth={1.8} aria-hidden />
+            </button>
+          </div>
           <nav
             className="absolute right-4 top-4 z-10 flex flex-wrap items-center justify-end gap-1 sm:right-6 sm:top-5"
             aria-label="Resources and social"
