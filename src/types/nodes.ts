@@ -382,6 +382,11 @@ export interface CommentNodeData extends BaseNodeData {
   resolved?: boolean;
   resolvedAt?: string;
   updatedAt?: string;
+  /**
+   * Optional link to another canvas node id. Lets users and the agent know which
+   * node this note refers to (shown in UI; included in planner context).
+   */
+  attachedToNodeId?: string | null;
 }
 
 /**

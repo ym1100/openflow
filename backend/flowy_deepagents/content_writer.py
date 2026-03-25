@@ -2049,11 +2049,33 @@ def _run_planner_stage(
     return decomposition, stage_index, current_stage_instruction, planner_message
 
 
+def _node_type_and_title_for_id(
+    workflow_state: Optional[Dict[str, Any]], node_id: str
+) -> Tuple[str, str]:
+    """Return (node_type, customTitle_or_empty) for a canvas node id."""
+    if not workflow_state or not node_id:
+        return "missing", ""
+    for node in (workflow_state.get("nodes") or []):
+        if not isinstance(node, dict):
+            continue
+        if str(node.get("id") or "") != node_id:
+            continue
+        typ = str(node.get("type") or "unknown")
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        title = ""
+        if isinstance(data, dict):
+            ct = data.get("customTitle")
+            if isinstance(ct, str) and ct.strip():
+                title = ct.strip()[:48]
+        return typ, title
+    return "missing", ""
+
+
 def _extract_canvas_plan_steps(workflow_state: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
     """Scan canvas for agent-authored comment nodes that represent plan steps.
 
     Returns a list of dicts ordered by node-id/position, each with:
-      nodeId, stepText, resolved, position_x
+      nodeId, stepText, resolved, position_x, optional attachedToNodeId / attachedToNodeType
     """
     if not workflow_state:
         return []
@@ -2073,16 +2095,48 @@ def _extract_canvas_plan_steps(workflow_state: Optional[Dict[str, Any]]) -> List
             # Match "Step N:", "#N:", "N." or "N)" at start
             if re.match(r'^(step\s*\d+|#\d+|\d+[\.\):])', text, re.IGNORECASE):
                 pos = node.get("position") or {}
-                plan_steps.append({
+                step: Dict[str, Any] = {
                     "nodeId": str(node.get("id") or ""),
                     "stepText": text,
                     "resolved": bool(data.get("resolved")),
                     "position_x": float(pos.get("x") or 0),
-                })
+                }
+                raw_attach = data.get("attachedToNodeId")
+                if isinstance(raw_attach, str) and raw_attach.strip():
+                    aid = raw_attach.strip()
+                    att_typ, att_title = _node_type_and_title_for_id(workflow_state, aid)
+                    step["attachedToNodeId"] = aid
+                    step["attachedToNodeType"] = att_typ
+                    if att_title:
+                        step["attachedToNodeTitle"] = att_title
+                plan_steps.append(step)
                 break  # one plan entry per comment node
     # Sort by x position (left-to-right order) then nodeId
     plan_steps.sort(key=lambda s: (s["position_x"], s["nodeId"]))
     return plan_steps
+
+
+def _extract_comment_node_links(workflow_state: Optional[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """All comment nodes with attachedToNodeId set (for planner context)."""
+    if not workflow_state:
+        return []
+    out: List[Dict[str, Any]] = []
+    for node in (workflow_state.get("nodes") or []):
+        if not isinstance(node, dict) or node.get("type") != "comment":
+            continue
+        data = node.get("data") if isinstance(node.get("data"), dict) else {}
+        raw = data.get("attachedToNodeId")
+        if not isinstance(raw, str) or not raw.strip():
+            continue
+        aid = raw.strip()
+        typ, title = _node_type_and_title_for_id(workflow_state, aid)
+        out.append({
+            "commentNodeId": str(node.get("id") or ""),
+            "attachedToNodeId": aid,
+            "attachedToNodeType": typ,
+            **({"attachedToNodeTitle": title} if title else {}),
+        })
+    return out
 
 
 def _run_prompt_specialist_stage(
@@ -2130,9 +2184,16 @@ def _run_prompt_specialist_stage(
             plan_block_parts.append(f"  Completed ({len(resolved_steps)}): {done_labels}")
         if pending_steps:
             next_step = pending_steps[0]
-            plan_block_parts.append(
-                f"  EXECUTE NOW -> [{next_step['nodeId']}] {next_step['stepText']}"
-            )
+            exec_line = f"  EXECUTE NOW -> [{next_step['nodeId']}] {next_step['stepText']}"
+            if next_step.get("attachedToNodeId"):
+                aid = next_step["attachedToNodeId"]
+                aty = next_step.get("attachedToNodeType", "?")
+                att = next_step.get("attachedToNodeTitle")
+                exec_line += f"  [linked target: {aid} type={aty}"
+                if att:
+                    exec_line += f" title={att}"
+                exec_line += "]"
+            plan_block_parts.append(exec_line)
             plan_block_parts.append(
                 f"  After building this step: emit updateNode nodeId='{next_step['nodeId']}' "
                 f"data={{\"resolved\":true,\"resolvedAt\":\"<ISO timestamp>\"}} to mark it done."
@@ -2158,6 +2219,24 @@ def _run_prompt_specialist_stage(
             f"then execute Step 1 and resolve plan-step-1 in the same response. "
             f"Step text must be specific and actionable (include node IDs, handles, positions)."
         )
+
+    comment_links = _extract_comment_node_links(workflow_state)
+    if comment_links:
+        link_parts = [
+            "COMMENT NODE LINKS (sticky note -> target node) — use when editing or explaining:",
+        ]
+        for L in comment_links:
+            t = L.get("attachedToNodeTitle")
+            tail = f" title={t}" if t else ""
+            link_parts.append(
+                f"  comment [{L['commentNodeId']}] -> target [{L['attachedToNodeId']}] "
+                f"type={L['attachedToNodeType']}{tail}"
+            )
+        link_block = "\n  ".join(link_parts)
+        if plan_steps or needs_plan:
+            hints.insert(1, link_block)
+        else:
+            hints.insert(0, link_block)
 
     # ── 1. Canvas state hints ─────────────────────────────────────────────────
     nodes = (workflow_state or {}).get("nodes") or []

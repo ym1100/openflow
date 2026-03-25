@@ -1,8 +1,9 @@
 "use client";
 
-import { type FormEventHandler, useRef, useState } from "react";
-import { NodeProps, Node } from "@xyflow/react";
+import { type FormEventHandler, useCallback, useMemo, useRef, useState } from "react";
+import { NodeProps, Node, useReactFlow } from "@xyflow/react";
 import { useWorkflowStore } from "@/store/workflowStore";
+import { useToast } from "@/components/Toast";
 import type { CommentEntry, CommentNodeData } from "@/types";
 
 type CommentNodeType = Node<CommentNodeData, "comment">;
@@ -29,6 +30,19 @@ const AGENT_AUTHOR = "Flowy";
 
 function isAgentEntry(entry: CommentEntry) {
   return entry.authorType === "agent" || entry.author === AGENT_AUTHOR;
+}
+
+function getAttachedTargetLabel(
+  nodes: Array<{ id: string; type: string; data?: Record<string, unknown> }>,
+  attachedId: string | null | undefined
+): { short: string; missing: boolean } {
+  if (!attachedId?.trim()) return { short: "", missing: false };
+  const n = nodes.find((x) => x.id === attachedId);
+  if (!n) return { short: attachedId.slice(0, 14), missing: true };
+  const raw = n.data?.customTitle;
+  const title = typeof raw === "string" && raw.trim() ? raw.trim().slice(0, 28) : "";
+  const kind = n.type || "node";
+  return { short: title ? `${kind}: ${title}` : kind, missing: false };
 }
 
 /** Avatar circle — indigo for agent, neutral for user */
@@ -67,6 +81,31 @@ export function CommentNode({ data, id, selected = false }: NodeProps<CommentNod
   const updateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const removeNode = useWorkflowStore((s) => s.removeNode);
   const onNodesChange = useWorkflowStore((s) => s.onNodesChange);
+  const { getNodes } = useReactFlow();
+
+  const attachedId = data.attachedToNodeId?.trim() || null;
+  const attachedLabel = useMemo(
+    () => getAttachedTargetLabel(nodes, attachedId),
+    [nodes, attachedId]
+  );
+
+  const handleAttachToSelection = useCallback(() => {
+    const sel = getNodes().filter(
+      (n) => n.selected && n.id !== id && n.type !== "comment"
+    );
+    if (sel.length !== 1) {
+      useToast
+        .getState()
+        .show("Select exactly one non-comment node, then click Link", "warning");
+      return;
+    }
+    updateNodeData(id, { attachedToNodeId: sel[0].id });
+    useToast.getState().show("Comment linked to node", "success");
+  }, [getNodes, id, updateNodeData]);
+
+  const handleClearAttachment = useCallback(() => {
+    updateNodeData(id, { attachedToNodeId: null });
+  }, [id, updateNodeData]);
 
   const entries: CommentEntry[] = data.content
     ? Array.isArray(data.content)
@@ -247,6 +286,28 @@ export function CommentNode({ data, id, selected = false }: NodeProps<CommentNod
                       <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
                     </svg>
                   </button>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleAttachToSelection(); }}
+                    className="h-8 px-2 flex items-center justify-center rounded-xl text-neutral-300 hover:bg-neutral-700 hover:text-sky-300 transition-colors text-[11px] font-medium gap-1"
+                    title="Link to selected node (select one other node first)"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                    </svg>
+                    Link
+                  </button>
+                  {attachedId ? (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleClearAttachment(); }}
+                      className="h-8 px-2 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200 transition-colors text-[11px]"
+                      title="Remove link"
+                    >
+                      Unlink
+                    </button>
+                  ) : null}
                 </>
               ) : (
                 <>
@@ -286,6 +347,29 @@ export function CommentNode({ data, id, selected = false }: NodeProps<CommentNod
                       <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
                     </svg>
                   </button>
+                  {/* Link to canvas node */}
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); handleAttachToSelection(); }}
+                    className="h-8 px-2 flex items-center justify-center rounded-xl text-neutral-300 hover:bg-neutral-700 hover:text-sky-300 transition-colors text-[11px] font-medium gap-1"
+                    title="Link to selected node (select one other node first)"
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" />
+                      <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" />
+                    </svg>
+                    Link
+                  </button>
+                  {attachedId ? (
+                    <button
+                      type="button"
+                      onClick={(e) => { e.stopPropagation(); handleClearAttachment(); }}
+                      className="h-8 px-2 flex items-center justify-center rounded-xl text-neutral-400 hover:bg-neutral-700 hover:text-neutral-200 transition-colors text-[11px]"
+                      title="Remove link"
+                    >
+                      Unlink
+                    </button>
+                  ) : null}
                 </>
               )}
             </div>
@@ -300,6 +384,17 @@ export function CommentNode({ data, id, selected = false }: NodeProps<CommentNod
         >
           {/* thread entries */}
           <div className="flex flex-col gap-0 px-3 pt-3 pb-2">
+            {attachedId ? (
+              <div className="mb-2 flex items-center gap-1.5 rounded-lg border border-sky-800/50 bg-sky-950/40 px-2 py-1.5 text-[10px] text-sky-100/90">
+                <span className="shrink-0 font-medium text-sky-400">Linked to</span>
+                <span
+                  className="min-w-0 truncate font-mono text-sky-200/95"
+                  title={attachedLabel.missing ? attachedId : `${attachedId} (${attachedLabel.short})`}
+                >
+                  {attachedLabel.missing ? `missing node ${attachedLabel.short}` : attachedLabel.short}
+                </span>
+              </div>
+            ) : null}
             {entries.map((entry, idx) => {
               const agent = isAgentEntry(entry);
               const isEditingThis = isEditing && editTargetId === entry.id;

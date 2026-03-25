@@ -78,6 +78,7 @@ Key data fields:
 - `content`: array of `CommentEntry` objects `{ id, text, author, authorType, date }`
 - `resolved`: boolean — marks thread as resolved (visual green state, not deleted)
 - `resolvedAt`: ISO timestamp of resolution
+- `attachedToNodeId` (optional): string id of another canvas node this note refers to (no edge; used for UI + planner context)
 
 `CommentEntry.authorType`:
 - `"user"` (default): neutral avatar, human comment

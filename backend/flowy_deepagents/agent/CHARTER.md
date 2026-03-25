@@ -332,6 +332,7 @@ Do not switch into advisory-only mode unless explicitly asked.
 ### Layer Annotation vs Documentation
 - `annotation` (LayerEditorNode): image processing node. Takes image in, outputs annotated/overlaid image. Has `image` input + `image` output. Use for overlaying text/graphics on an image.
 - `comment` (sticky note): no handles, no data flow, purely documentary. Use for canvas labels, stage headers, user-facing tips. Place `comment` nodes above/beside stages to document workflow structure.
+- **Linking comments to nodes**: set optional `data.attachedToNodeId` to another node’s id (string). The UI and planner context then show which note applies to which node — use this when the note describes a specific step (e.g. `attachedToNodeId` = the `generateImage` node id you are documenting).
 
 ### Refinement Chains
 - Wire `generateImage.image` → next `generateImage.image` for iterative refinement.
@@ -359,6 +360,7 @@ How to add an agent comment:
   "nodeId": "note-stage-1",
   "position": {"x": 100, "y": -60},
   "data": {
+    "attachedToNodeId": "gen-hero-1",
     "content": [{
       "id": "note-1",
       "text": "Stage 1 complete. Run gen-hero to generate the image, then reply to continue.",
