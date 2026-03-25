@@ -149,16 +149,18 @@ Master these patterns before inventing new topology.
 - Do NOT add `mediaInput` or any node.
 - Use when: user says "extract a prompt from this image", "write a prompt for", "give me a prompt" — intent is extraction/advisory only.
 
-### 23) Canvas-Native Planning (Visible Step-by-Step Build)
-- Use when: complex request (4+ nodes, multi-stage, or multi-modal).
-- Phase 1 — Plan: emit numbered comment nodes as a build plan, spread left-to-right at y=-140.
+### 23) Canvas-Native Planning (Default for All Multi-Step Work)
+- Use when: any request requiring 3+ operations (build, fix, or fix+execute).
+- Skip only for: 1–2 simple ops or when user says "just do it".
+- Phase 1 — Plan: emit all `plan-step-N` comment nodes (y=-140, x spaced 280px from x=80).
   - `nodeId: "plan-step-N"`, `author: "Flowy"`, `authorType: "agent"`
-  - Text: `"Step N: <exact build instruction>"`
-  - Immediately execute Step 1 ops in the same response, then resolve plan-step-1.
-- Phase 2+ — Execute: each subsequent call executes only the next unresolved plan step + resolves it.
-- Layout: plan row at y=-140, actual workflow nodes at y=0+.
-- Max 6 steps. One step per response. Always resolve step before moving on.
-- The Planning Context block in your prompt tells you exactly which step is next.
+  - Text: `"Step N: <specific, actionable instruction with node IDs + handles>"`
+  - Immediately execute Step 1 and resolve plan-step-1 in the same response.
+- Phase 2+ — Execute: each subsequent call reads Planning Context, executes next unresolved step, resolves it.
+- Layout: plan row at y=-140, workflow nodes at y=0+.
+- Max 6 steps. ONE step per response. Always resolve the completed step.
+- Fix scenario: Step 1 = diagnose/remove wrong op; Step 2 = add correct op; Step 3 = verify + execute.
+- Execute scenario: include `executeNodeIds` in the step that runs the generation node.
 
 ### 22) Minimal Reset + Rebuild
 - First operation: `clearCanvas`

@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+﻿#!/usr/bin/env python3
 from __future__ import annotations
 
 import functools
@@ -50,7 +50,20 @@ def _safe_stream_write(stream: Any, text: str) -> None:
     try:
         stream.write(text)
     except UnicodeEncodeError:
-        stream.write(_sanitize_text(text))
+        # Primary fallback: write UTF-8 bytes directly to the binary buffer.
+        # This handles Windows where stdout defaults to cp1252.
+        try:
+            if hasattr(stream, "buffer"):
+                stream.buffer.write(_sanitize_text(text).encode("utf-8", errors="replace"))
+                stream.buffer.flush()
+                return
+        except Exception:
+            pass
+        # Final fallback: strip to ASCII.
+        try:
+            stream.write(text.encode("ascii", errors="replace").decode("ascii"))
+        except Exception:
+            pass
 
 
 _STAGE_META: Dict[str, Dict[str, str]] = {
@@ -1582,8 +1595,8 @@ def _parse_user_intent_signals(
         "For canvasOperationHints: output an ordered list of EditOperation type strings that best match "
         "what the user wants done to the **graph** (canvas). First item = strongest intent. "
         "Use an empty list when the message is pure chat, control-only, or unrelated to graph edits.\n"
-        "Choose the **most specific** operation type(s); e.g. full reset → [\"clearCanvas\"] not many removeNode; "
-        "connect two nodes → [\"addEdge\"]; delete selection → [\"removeNode\"]; tweak prompt/model → [\"updateNode\"].\n"
+        "Choose the **most specific** operation type(s); e.g. full reset -> [\"clearCanvas\"] not many removeNode; "
+        "connect two nodes -> [\"addEdge\"]; delete selection -> [\"removeNode\"]; tweak prompt/model -> [\"updateNode\"].\n"
         "If the user wants both structure change and running generators, include edit hints **and** set asksExecuteNodes=true."
     )
     user_prompt = (
@@ -1663,10 +1676,10 @@ def _format_canvas_operation_hints_block(intent_signals: Optional[UserIntentSign
         lines.append(f"- canvasOperationHints: {json.dumps(hints, ensure_ascii=False)}")
         lines.append(
             "Mapping guide: "
-            "new node / add X → addNode; delete one node → removeNode; wipe whole graph → clearCanvas; "
-            "change prompt/model/settings → updateNode; connect/link/wire → addEdge; disconnect → removeEdge; "
-            "reposition/layout → moveNode; box multiple nodes → createGroup; remove frame only → deleteGroup; "
-            "rename/recolor/lock group → updateGroup; assign node to group → setNodeGroup."
+            "new node / add X -> addNode; delete one node -> removeNode; wipe whole graph -> clearCanvas; "
+            "change prompt/model/settings -> updateNode; connect/link/wire -> addEdge; disconnect -> removeEdge; "
+            "reposition/layout -> moveNode; box multiple nodes -> createGroup; remove frame only -> deleteGroup; "
+            "rename/recolor/lock group -> updateGroup; assign node to group -> setNodeGroup."
         )
     if (intent_signals.rationale or "").strip():
         lines.append(f"- parser rationale: {intent_signals.rationale.strip()}")
@@ -1845,8 +1858,8 @@ CLOSE_CANVAS_PLAN = (
     "applying operations when the user approves.\n"
     "Each item has \"type\": one of snapshot, click, dblclick, hover, scrollIntoView, fill, type, press, wait, waitFor.\n"
     "Types that need a target include \"target\": an object with \"kind\": ref | dataId | agentNodeType | flowNode | handle, plus:\n"
-    "  ref → \"ref\": string (e.g. ui.addNode); dataId → \"value\": string; agentNodeType → \"nodeType\": string; "
-    "flowNode → \"nodeId\": string; handle → \"nodeId\": string and optional \"handleId\": string.\n"
+    "  ref -> \"ref\": string (e.g. ui.addNode); dataId -> \"value\": string; agentNodeType -> \"nodeType\": string; "
+    "flowNode -> \"nodeId\": string; handle -> \"nodeId\": string and optional \"handleId\": string.\n"
     "fill/type need \"text\": string; wait needs \"ms\": number; waitFor optional \"timeoutMs\": number; press needs \"key\": string.\n"
     "Prefer **operations** for graph topology (nodes/edges/groups). Use **uiCommands** only when real menus/toolbars/clicks are required.\n"
     "Keep uiCommands minimal; omit or use [] when not needed.\n"
@@ -1910,7 +1923,7 @@ def _run_plan_advisor_only(
             return text.strip()
     return (
         "I can help you design that workflow step by step. "
-        "Tell me your goal (e.g. image → video) and any constraints (models, style, length)."
+        "Tell me your goal (e.g. image -> video) and any constraints (models, style, length)."
     )
 
 
@@ -2034,6 +2047,21 @@ def _run_prompt_specialist_stage(
 
     # ── 0. Canvas plan-step detection (highest priority) ─────────────────────
     plan_steps = _extract_canvas_plan_steps(workflow_state)
+    msg_lower_for_plan = planner_message.lower()
+
+    # Detect if this looks like a build/fix/execute request that warrants a canvas plan
+    is_build_request = any(k in msg_lower_for_plan for k in [
+        "build", "create", "make", "add", "set up", "setup", "generate", "design", "workflow"
+    ])
+    is_fix_request = any(k in msg_lower_for_plan for k in [
+        "fix", "broken", "repair", "wrong", "incorrect", "missing", "error", "not working",
+        "doesn't work", "failed", "issue", "problem", "debug"
+    ])
+    is_execute_request = any(k in msg_lower_for_plan for k in [
+        "run", "execute", "generate now", "start", "go", "do it"
+    ])
+    needs_plan = is_build_request or is_fix_request or (is_execute_request and is_fix_request)
+
     if plan_steps:
         resolved_steps = [s for s in plan_steps if s["resolved"]]
         pending_steps = [s for s in plan_steps if not s["resolved"]]
@@ -2045,7 +2073,7 @@ def _run_prompt_specialist_stage(
         if pending_steps:
             next_step = pending_steps[0]
             plan_block_parts.append(
-                f"  EXECUTE NOW → [{next_step['nodeId']}] {next_step['stepText']}"
+                f"  EXECUTE NOW -> [{next_step['nodeId']}] {next_step['stepText']}"
             )
             plan_block_parts.append(
                 f"  After building this step: emit updateNode nodeId='{next_step['nodeId']}' "
@@ -2055,9 +2083,23 @@ def _run_prompt_specialist_stage(
                 remaining = "; ".join(s["stepText"][:50] for s in pending_steps[1:])
                 plan_block_parts.append(f"  Remaining steps (do NOT execute yet): {remaining}")
         else:
-            plan_block_parts.append("  All steps resolved. Plan complete — no further execution needed unless user asks.")
-
+            plan_block_parts.append(
+                "  All steps resolved. Plan complete — workflow is built. "
+                "Do not create new plan steps unless user asks for something new."
+            )
         hints.insert(0, "\n  ".join(plan_block_parts))
+
+    elif needs_plan:
+        # No plan exists yet — remind agent to create one
+        scenario = "fix and re-execute" if (is_fix_request and is_execute_request) else \
+                   "fix" if is_fix_request else \
+                   "build"
+        hints.insert(0,
+            f"NO CANVAS PLAN EXISTS YET. This is a '{scenario}' request. "
+            f"If it requires 3+ operations: emit plan-step-N comment nodes first (y=-140, x spaced 280px), "
+            f"then execute Step 1 and resolve plan-step-1 in the same response. "
+            f"Step text must be specific and actionable (include node IDs, handles, positions)."
+        )
 
     # ── 1. Canvas state hints ─────────────────────────────────────────────────
     nodes = (workflow_state or {}).get("nodes") or []
@@ -2140,11 +2182,11 @@ def _run_prompt_specialist_stage(
         hints.append("For video generation: include motion direction, camera movement, pacing, and duration in the generateVideo prompt field.")
         ease_words = ["ease", "spring", "smooth", "accelerat", "decelerat", "slow in", "slow out"]
         if any(k in msg_lower for k in ease_words):
-            hints.append("Easing requested: add easeCurve node and wire easeCurve.easeCurve → generateVideo.easeCurve.")
+            hints.append("Easing requested: add easeCurve node and wire easeCurve.easeCurve -> generateVideo.easeCurve.")
 
     # ── 7. 3D-specific hints ──────────────────────────────────────────────────
     if wants_3d:
-        hints.append("For 3D generation: add generate3d node + glbViewer node. Wire generate3d.3d → glbViewer.3d.")
+        hints.append("For 3D generation: add generate3d node + glbViewer node. Wire generate3d.3d -> glbViewer.3d.")
 
     # ── 8. Variant count precision ────────────────────────────────────────────
     count_match = re.search(r'\b([2-9]|1[0-2])\s*(variation|variant|option|version|look|branch|alternative)', msg_lower)
@@ -2368,6 +2410,15 @@ def _build_planner_chat_models(provider: str, model_id: str) -> Tuple[Any, Any]:
 
 
 def main() -> None:
+    # Force UTF-8 on Windows where stdout/stderr default to cp1252.
+    try:
+        if hasattr(sys.stdout, "reconfigure"):
+            sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        if hasattr(sys.stderr, "reconfigure"):
+            sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
     try:
         payload = _read_stdin_json()
         message = payload.get("message") or ""
