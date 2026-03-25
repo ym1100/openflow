@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useWorkflowStore } from "@/store/workflowStore";
-import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
+import { coerceImageUrl, getConnectedInputsPure } from "@/store/utils/connectedInputs";
 
 interface ConnectedImageThumbnailsProps {
   nodeId: string;
@@ -16,7 +16,10 @@ export function ConnectedImageThumbnails({ nodeId, className = "" }: ConnectedIm
 
   const connectedImages = useMemo(() => {
     const inputs = getConnectedInputsPure(nodeId, nodes, edges, undefined, dimmedNodeIds);
-    return inputs.images ?? [];
+    const raw = inputs.images ?? [];
+    return raw
+      .map((u) => coerceImageUrl(u))
+      .filter((u): u is string => u != null);
   }, [nodeId, nodes, edges, dimmedNodeIds]);
 
   if (connectedImages.length === 0) return null;

@@ -38,6 +38,23 @@ export interface ConnectedInputs {
 }
 
 /**
+ * Normalize image URL from upstream node output. Handles corrupted saves where
+ * `outputImage` etc. is an object `{ url: string }` instead of a bare string.
+ */
+export function coerceImageUrl(value: unknown): string | null {
+  if (value == null) return null;
+  if (typeof value === "string") {
+    const t = value.trim();
+    return t.length ? t : null;
+  }
+  if (typeof value === "object" && value !== null && "url" in value) {
+    const u = (value as { url: unknown }).url;
+    if (typeof u === "string" && u.trim()) return u.trim();
+  }
+  return null;
+}
+
+/**
  * Helper to determine if a handle ID is an image type
  */
 function isImageHandle(handleId: string | null | undefined): boolean {
@@ -170,7 +187,10 @@ export function getConnectedInputsPure(
         const edgeType = edge.sourceHandle; // Will be "image", "text", "video", "audio", "3d", or "easeCurve"
 
         if (edgeType === "image" || (!edgeType && isImageHandle(edge.sourceHandle))) {
-          images.push(...routerInputs.images);
+          for (const u of routerInputs.images) {
+            const c = coerceImageUrl(u);
+            if (c) images.push(c);
+          }
         } else if (edgeType === "text" || (!edgeType && isTextHandle(edge.sourceHandle))) {
           if (routerInputs.text) text = routerInputs.text;
         } else if (edgeType === "video") {
@@ -202,7 +222,10 @@ export function getConnectedInputsPure(
         const edgeType = switchData.inputType;
 
         if (edgeType === "image") {
-          images.push(...switchInputs.images);
+          for (const u of switchInputs.images) {
+            const c = coerceImageUrl(u);
+            if (c) images.push(c);
+          }
         } else if (edgeType === "text") {
           if (switchInputs.text) text = switchInputs.text;
         } else if (edgeType === "video") {
@@ -280,7 +303,8 @@ export function getConnectedInputsPure(
         // (Guards against corrupted node data during parallel execution)
         text = typeof value === 'string' ? value : String(value);
       } else if (isImageHandle(handleId)) {
-        images.push(value);
+        const img = coerceImageUrl(value);
+        if (img) images.push(img);
       }
     });
 
