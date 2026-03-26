@@ -170,6 +170,11 @@ interface WorkflowStore {
   // Node operations
   addNode: (type: NodeType, position: XYPosition, initialData?: Partial<WorkflowNodeData>) => string;
   updateNodeData: (nodeId: string, data: Partial<WorkflowNodeData>) => void;
+  /** Update React Flow node top-level props (controlled nodes array). */
+  updateNodeProps: (
+    nodeId: string,
+    patch: Partial<Pick<WorkflowNode, "zIndex" | "draggable" | "selectable" | "selected">>,
+  ) => void;
   /** Ensures node.style width/height meet minimums; returns true if the store was updated. */
   ensureNodeMinDimensions: (
     nodeId: string,
@@ -583,6 +588,13 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
         }));
       }
     }
+  },
+
+  updateNodeProps: (nodeId, patch) => {
+    set((state) => ({
+      nodes: state.nodes.map((n) => (n.id === nodeId ? { ...n, ...patch } : n)),
+      hasUnsavedChanges: true,
+    }));
   },
 
   ensureNodeMinDimensions: (nodeId, opts) => {

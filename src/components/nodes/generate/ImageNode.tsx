@@ -21,6 +21,7 @@ import { NodeRunButton } from "../shared/NodeRunButton";
 import { ConnectedImageThumbnails } from "../shared/ConnectedImageThumbnails";
 import { getConnectedInputsPure } from "@/store/utils/connectedInputs";
 import { GenerateImageToolbar } from "./GenerateImageToolbar";
+import { ImageCropOverlay } from "../shared/ImageCropOverlay";
 
 // Base 10 aspect ratios (all Gemini image models)
 const BASE_ASPECT_RATIOS: AspectRatio[] = ["1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"];
@@ -47,6 +48,7 @@ type ImageNodeType = Node<NanoBananaNodeData, "generateImage">;
 export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
   const nodeData = data;
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const updateNodeProps = useWorkflowStore((state) => state.updateNodeProps);
   const generationsPath = useWorkflowStore((state) => state.generationsPath);
   const { hasPromptConnection, promptDisplayValue } = useWorkflowStore(
     useShallow((state) => {
@@ -325,6 +327,16 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
 
   const regenerateNode = useWorkflowStore((state) => state.regenerateNode);
   const isRunning = useWorkflowStore((state) => state.isRunning);
+  const cropActive = !!nodeData.cropMode && !!nodeData.outputImage;
+
+  useEffect(() => {
+    updateNodeProps(id, {
+      draggable: !cropActive,
+      selectable: true,
+      selected: cropActive ? true : undefined,
+      zIndex: cropActive ? 1001 : 0,
+    });
+  }, [cropActive, id, updateNodeProps]);
 
   const handleRegenerate = useCallback(() => {
     regenerateNode(id);
@@ -769,8 +781,19 @@ export function ImageNode({ id, data, selected }: NodeProps<ImageNodeType>) {
             <img
               src={nodeData.outputImage}
               alt="Generated"
-              className="w-full h-full object-cover"
+              className={`w-full h-full object-cover ${cropActive ? "z-[999]" : "rounded-[12px]"}`}
             />
+            {cropActive && (
+              <ImageCropOverlay
+                imageUrl={nodeData.outputImage}
+                onCancel={() => updateNodeData(id, { cropMode: false })}
+                onApply={(cropped, _dims) => {
+                  updateNodeData(id, { outputImage: cropped, cropMode: false });
+                  // Keep aspect ratio resize logic happy by updating the current node size on next effect;
+                  // outputImage change already triggers the aspect-resize effect.
+                }}
+              />
+            )}
             {/* Loading overlay for generation */}
             {nodeData.status === "loading" && (
               <div className="absolute inset-0 bg-neutral-900/70 flex items-center justify-center">

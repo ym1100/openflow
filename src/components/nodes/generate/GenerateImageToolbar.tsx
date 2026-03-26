@@ -76,6 +76,7 @@ export function GenerateImageToolbar({ nodeId }: GenerateImageToolbarProps) {
 
   const data = node?.data as NanoBananaNodeData | undefined;
   const hasImage = !!data?.outputImage;
+  const cropActive = !!data?.cropMode;
 
   const handleSplitIntoGrid = async (rows: number, cols: number) => {
     if (!hasImage || !data?.outputImage || !node) return;
@@ -208,6 +209,10 @@ export function GenerateImageToolbar({ nodeId }: GenerateImageToolbarProps) {
   }, [data]);
 
   if (!node || !data) return null;
+
+  const handleCropToggle = () => {
+    updateNodeData(nodeId, { cropMode: !cropActive });
+  };
 
   const handleUpscaleImage = async () => {
     if (!hasImage || !data.outputImage) return;
@@ -461,7 +466,15 @@ export function GenerateImageToolbar({ nodeId }: GenerateImageToolbarProps) {
 
           {/* Direct tools + overflow menu */}
           <div ref={toolsRef} className="relative flex items-center gap-x-px">
-            <button type="button" disabled className="h-7 w-7 shrink-0 flex items-center justify-center rounded-lg p-1.5 text-neutral-300 hover:bg-white/5 disabled:opacity-50" title="Crop">
+            <button
+              type="button"
+              onClick={handleCropToggle}
+              disabled={!hasImage}
+              className={`h-7 w-7 shrink-0 flex items-center justify-center rounded-lg p-1.5 hover:bg-white/5 disabled:opacity-50 ${
+                cropActive ? "text-white bg-white/10" : "text-neutral-300"
+              }`}
+              title="Crop"
+            >
               <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M6 2v14a2 2 0 0 0 2 2h14" /><path d="M18 22V8a2 2 0 0 0-2-2H2" /></svg>
             </button>
             <button type="button" disabled className="h-7 w-7 shrink-0 flex items-center justify-center rounded-lg p-1.5 text-neutral-300 hover:bg-white/5 disabled:opacity-50" title="3D Camera Angle">

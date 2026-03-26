@@ -15,6 +15,7 @@ import { MediaInputNodeData, type MediaInputMode } from "@/types";
 import { calculateNodeSizeForFullBleed, getVideoDimensions, SQUARE_SIZE } from "@/utils/nodeDimensions";
 import { NodeVideoPlayer } from "../shared/NodeVideoPlayer";
 import { UploadToolbar } from "./UploadToolbar";
+import { ImageCropOverlay } from "../shared/ImageCropOverlay";
 import { OrbitCameraControl } from "../generate/OrbitCameraControl";
 import { loadNodeDefaults } from "@/store/utils/localStorage";
 import * as THREE from "three";
@@ -160,6 +161,7 @@ export function UploadNode({ id, data, selected }: NodeProps<MediaInputNodeType>
           ? "3d"
           : "image";
   const updateNodeData = useWorkflowStore((state) => state.updateNodeData);
+  const updateNodeProps = useWorkflowStore((state) => state.updateNodeProps);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const audioInputRef = useRef<HTMLInputElement>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -176,6 +178,7 @@ export function UploadNode({ id, data, selected }: NodeProps<MediaInputNodeType>
     () => coerceMediaInputImageUrl(nodeData.image),
     [nodeData.image]
   );
+  const cropActive = mode === "image" && !!resolvedImageUrl && !!nodeData.cropMode;
   const displayFilename = useMemo(() => dedupeDisplayFilename(nodeData.filename), [nodeData.filename]);
   const [cameraSettings, setCameraSettings] = useState({
     rotation: 0,
@@ -495,6 +498,19 @@ export function UploadNode({ id, data, selected }: NodeProps<MediaInputNodeType>
 
   const hasContent = !!(nodeData.image || nodeData.audioFile || nodeData.videoFile || nodeData.glbUrl);
 
+  const setCropMode = useCallback(
+    (next: boolean) => {
+      updateNodeData(id, { cropMode: next });
+      updateNodeProps(id, {
+        draggable: !next,
+        selectable: true,
+        selected: next ? true : undefined,
+        zIndex: next ? 1001 : 0,
+      });
+    },
+    [id, updateNodeData, updateNodeProps]
+  );
+
   const buildCameraAnglePrompt = useCallback(() => {
     const parts = [
       "Generate a new camera angle from the input image while preserving the same subject and scene identity.",
@@ -584,6 +600,8 @@ export function UploadNode({ id, data, selected }: NodeProps<MediaInputNodeType>
         <UploadToolbar
           nodeId={id}
           hasImage={mode === "image" ? !!resolvedImageUrl : !!nodeData.videoFile}
+          cropActive={cropActive}
+          onCropToggle={() => mode === "image" && resolvedImageUrl && setCropMode(!cropActive)}
           onReplaceClick={handleReplace}
           onCameraAngleClick={() => setCameraPanelOpen((v) => !v)}
           onDownloadClick={undefined}
@@ -671,11 +689,28 @@ export function UploadNode({ id, data, selected }: NodeProps<MediaInputNodeType>
           {nodeData.image ? (
             <div className="relative group flex-1 min-h-0 min-w-0 overflow-hidden">
               {resolvedImageUrl ? (
-                <img
-                  src={resolvedImageUrl}
-                  alt={displayFilename || "Uploaded image"}
-                  className="w-full h-full object-cover"
-                />
+                <>
+                  <img
+                    src={resolvedImageUrl}
+                    alt={displayFilename || "Uploaded image"}
+                    className={`w-full h-full object-cover ${cropActive ? "z-[999]" : "rounded-[12px]"}`}
+                  />
+                  {cropActive && (
+                    <ImageCropOverlay
+                      imageUrl={resolvedImageUrl}
+                      onCancel={() => setCropMode(false)}
+                      onApply={(cropped, dims) => {
+                        updateNodeData(id, {
+                          image: cropped,
+                          imageRef: undefined,
+                          dimensions: dims,
+                          filename: displayFilename ? `${displayFilename}-crop.png` : "crop.png",
+                        });
+                        setCropMode(false);
+                      }}
+                    />
+                  )}
+                </>
               ) : (
                 <div className="flex min-h-[120px] flex-1 flex-col items-center justify-center gap-2 bg-neutral-900/85 px-3 text-center">
                   <span className="text-[11px] leading-snug text-amber-200/90">

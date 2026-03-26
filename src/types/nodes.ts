@@ -33,6 +33,8 @@ export interface MediaInputNodeData extends BaseNodeData {
   image: string | null;
   imageRef?: string;
   dimensions: { width: number; height: number } | null;
+  /** When true, node enters crop interaction mode (UI-only). */
+  cropMode?: boolean;
   // Audio mode
   audioFile: string | null;
   duration: number | null;
@@ -177,6 +179,8 @@ export interface NanoBananaNodeData extends BaseNodeData {
   inputPrompt: string | null;
   outputImage: string | null;
   outputImageRef?: string; // External image reference for storage optimization
+  /** When true, node enters crop interaction mode (UI-only). */
+  cropMode?: boolean;
   aspectRatio: AspectRatio;
   resolution: Resolution; // Only used by Nano Banana Pro
   model: ModelType;
