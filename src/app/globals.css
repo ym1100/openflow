@@ -176,49 +176,45 @@ body {
   pointer-events: none;
 }
 
-/* Right handles - positioned outside node with padding from edge */
+/*
+ * Left/right handles: keep the handle center on the node border so edges meet the card
+ * even when handles are hidden. @xyflow defaults use the same anchor; we only add a tall
+ * hit strip. The circle icon (::after) shifts outward on hover/select — it does not move
+ * the connection point.
+ */
 .react-flow__handle-right {
-  right: -32px;
+  right: 0;
   left: auto;
-  top: 50%;
-  height: 96px;
-  transform: translate(32px, -50%);
+  height: 96px !important;
+  min-height: 96px !important;
+  transform: translate(50%, -50%);
 }
 
-.react-flow__handle-right::after {
-  width: 24px;
-  height: 24px;
-}
-
-/* Left handles - positioned outside node with padding from edge */
 .react-flow__handle-left {
-  left: -32px;
+  left: 0;
   right: auto;
-  top: 50%;
-  height: 96px;
-  transform: translate(-32px, -50%);
+  height: 96px !important;
+  min-height: 96px !important;
+  transform: translate(-50%, -50%);
 }
 
+.react-flow__handle-right::after,
 .react-flow__handle-left::after {
   width: 24px;
   height: 24px;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
-/* Force connector spacing outside nodes (all node types). */
-.react-flow__node .react-flow__handle.react-flow__handle-right,
-.react-flow__node-default .react-flow__handle.react-flow__handle-right,
-.react-flow__node-output .react-flow__handle.react-flow__handle-right {
-  right: -32px !important;
-  left: auto !important;
-  transform: translate(32px, -50%) !important;
+.react-flow__node:hover .react-flow__handle-right::after,
+.react-flow__node.selected .react-flow__handle-right::after {
+  transform: translate(calc(-50% + 14px), -50%);
 }
 
-.react-flow__node .react-flow__handle.react-flow__handle-left,
-.react-flow__node-default .react-flow__handle.react-flow__handle-left,
-.react-flow__node-output .react-flow__handle.react-flow__handle-left {
-  left: -32px !important;
-  right: auto !important;
-  transform: translate(-32px, -50%) !important;
+.react-flow__node:hover .react-flow__handle-left::after,
+.react-flow__node.selected .react-flow__handle-left::after {
+  transform: translate(calc(-50% - 14px), -50%);
 }
 
 /* Prompt/text handles - blue (same as before) */
