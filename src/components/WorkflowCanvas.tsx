@@ -17,6 +17,8 @@ import {
   Connection,
   Edge,
   useReactFlow,
+  useNodesInitialized,
+  useUpdateNodeInternals,
   OnConnectEnd,
   Node,
   OnSelectionChangeParams,
@@ -177,6 +179,51 @@ const findScrollableAncestor = (target: HTMLElement, deltaX: number, deltaY: num
 
   return null;
 };
+
+/**
+ * Full page reload: React Flow can render edges before handle bounds / measurements exist.
+ * EdgeWrapper then gets null positions and renders nothing until something triggers a refresh.
+ * One sync after nodes report initialized forces handle lookup so edges appear without user interaction.
+ */
+function SyncEdgeInternalsAfterNodesReady() {
+  const updateNodeInternals = useUpdateNodeInternals();
+  const nodesInitialized = useNodesInitialized();
+  const edgeCount = useWorkflowStore((s) => s.edges.length);
+  const workflowId = useWorkflowStore((s) => s.workflowId);
+  const didSyncRef = useRef(false);
+  const prevWorkflowIdRef = useRef<string | null | undefined>(undefined);
+
+  useEffect(() => {
+    if (prevWorkflowIdRef.current !== workflowId) {
+      didSyncRef.current = false;
+      prevWorkflowIdRef.current = workflowId;
+    }
+  }, [workflowId]);
+
+  useEffect(() => {
+    if (edgeCount === 0) didSyncRef.current = false;
+  }, [edgeCount]);
+
+  useEffect(() => {
+    if (!nodesInitialized || edgeCount === 0 || didSyncRef.current) return;
+    let rafOuter = 0;
+    let rafInner = 0;
+    rafOuter = requestAnimationFrame(() => {
+      rafInner = requestAnimationFrame(() => {
+        useWorkflowStore.getState().nodes.forEach((node) => {
+          updateNodeInternals(node.id);
+        });
+        didSyncRef.current = true;
+      });
+    });
+    return () => {
+      cancelAnimationFrame(rafOuter);
+      cancelAnimationFrame(rafInner);
+    };
+  }, [nodesInitialized, edgeCount, updateNodeInternals]);
+
+  return null;
+}
 
 export function WorkflowCanvas() {
   const {
@@ -776,7 +823,7 @@ export function WorkflowCanvas() {
       if (data.success && data.workflow) {
         captureSnapshot(); // Capture BEFORE loading new workflow
         await loadWorkflow(data.workflow, undefined, { preserveSnapshot: true });
-        setIsChatOpen(false);
+        setFlowyAgentOpen(false);
         showToast("Workflow generated successfully", "success");
       } else {
         showToast(data.error || "Failed to generate workflow", "error");
@@ -787,7 +834,7 @@ export function WorkflowCanvas() {
     } finally {
       setIsBuildingWorkflow(false);
     }
-  }, [loadWorkflow, showToast, captureSnapshot]);
+  }, [loadWorkflow, showToast, captureSnapshot, setFlowyAgentOpen]);
 
   // Create lightweight workflow state for chat (strip base64 images)
   const chatWorkflowState = useMemo(() => {
@@ -1797,6 +1844,7 @@ export function WorkflowCanvas() {
         proOptions={{ hideAttribution: true }}
         defaultEdgeOptions={defaultEdgeOptions}
       >
+        <SyncEdgeInternalsAfterNodesReady />
         <SharedEdgeGradients />
         <GroupBackgroundsPortal />
         <GroupControlsOverlay />

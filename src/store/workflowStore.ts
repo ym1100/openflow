@@ -436,6 +436,21 @@ function clearStaleInputImages(
   }
 }
 
+/** Must match UploadNode getOutputHandle() — used to fix persisted edges after mode/file drift (RF #008). */
+function resolveMediaInputOutputSourceHandle(node: WorkflowNode): string {
+  const d = node.data as {
+    mode?: string;
+    videoFile?: string | null;
+    audioFile?: string | null;
+  };
+  const mode = d.mode ?? "image";
+  if (d.videoFile) return "video";
+  if (mode === "audio") return "audio";
+  if (mode === "video") return "video";
+  if (mode === "3d") return "image";
+  return "image";
+}
+
 const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   nodes: [],
   edges: [],
@@ -1819,6 +1834,24 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       if (th === "image") return { ...edge, targetHandle: "image-0" };
       if (th === "text") return { ...edge, targetHandle: "text-0" };
       return edge;
+    });
+
+    // Upload (mediaInput): output handle id is derived from mode + assets; saves often drift (e.g. mode still
+    // "image" but videoFile set) → wrong sourceHandle breaks React Flow #008.
+    const mediaInputById = new Map(
+      workflow.nodes.filter((n) => n.type === "mediaInput").map((n) => [n.id, n])
+    );
+    workflow.edges = workflow.edges.map((edge) => {
+      const src = mediaInputById.get(edge.source);
+      if (!src) return edge;
+      const expected = resolveMediaInputOutputSourceHandle(src);
+      if (edge.sourceHandle === expected) return edge;
+      const th = edge.targetHandle ?? "default";
+      return {
+        ...edge,
+        sourceHandle: expected,
+        id: `edge-${edge.source}-${edge.target}-${expected}-${th}`,
+      };
     });
 
     // Deduplicate edges by ID (keep the last occurrence, which is the most recent)
