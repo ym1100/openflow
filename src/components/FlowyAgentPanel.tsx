@@ -42,6 +42,8 @@ import {
   Minus,
   Settings2,
   SquarePlus,
+  History,
+  MoreHorizontal,
 } from "lucide-react";
 import ReactMarkdown, { type Components } from "react-markdown";
 import {
@@ -268,6 +270,36 @@ function findLastCanvasSnapshotInSession(session: ChatSession | undefined): Flow
     if (raw && isFlowyCanvasSnapshot(raw)) return raw;
   }
   return null;
+}
+
+function getRestoreCanvasHandler(
+  appliedPlan: AppliedPlanRecord | undefined,
+  onRestoreFlowyCanvas: ((snapshot: FlowyCanvasSnapshot) => void | Promise<void>) | undefined
+): (() => void) | undefined {
+  if (!onRestoreFlowyCanvas || !appliedPlan?.workflowSnapshot) return undefined;
+  if (!isFlowyCanvasSnapshot(appliedPlan.workflowSnapshot)) return undefined;
+  const snap = appliedPlan.workflowSnapshot;
+  return () => void Promise.resolve(onRestoreFlowyCanvas(snap)).catch(() => {});
+}
+
+function RestoreCanvasToHereButton({
+  onClick,
+  className = "",
+}: {
+  onClick: () => void;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex max-w-full items-center gap-1.5 rounded-lg border border-white/10 bg-white/[0.04] px-2 py-1 text-left text-[11px] font-medium text-neutral-200 transition-colors hover:bg-white/[0.08] hover:text-white ${className}`}
+      title="Restore the canvas to how it looked after this reply"
+    >
+      <History className="size-3.5 shrink-0 text-sky-400/90" strokeWidth={2} aria-hidden />
+      <span>Restore canvas to here</span>
+    </button>
+  );
 }
 
 /** Long / multi-line user prompts get a collapsed one-line preview + expand, like the reference chat panel. */
@@ -699,11 +731,18 @@ const FLOWY_CHAT_MD_COMPONENTS: Components = {
   },
 };
 
-function AppliedPlanWidget({ plan }: { plan: AppliedPlanRecord }) {
+function AppliedPlanWidget({
+  plan,
+  onRestoreCanvas,
+}: {
+  plan: AppliedPlanRecord;
+  /** When set, show “Restore canvas to here” for this message’s stored snapshot. */
+  onRestoreCanvas?: () => void;
+}) {
   const [isExpanded, setIsExpanded] = useState(false);
 
   return (
-    <div className="mx-5 mt-1.5">
+    <div className="mx-5 mt-1.5 flex flex-col gap-1.5">
       <button
         type="button"
         onClick={() => setIsExpanded((v) => !v)}
@@ -736,6 +775,7 @@ function AppliedPlanWidget({ plan }: { plan: AppliedPlanRecord }) {
           ))}
         </div>
       )}
+      {onRestoreCanvas && <RestoreCanvasToHereButton onClick={onRestoreCanvas} className="w-fit" />}
     </div>
   );
 }
@@ -796,6 +836,12 @@ export function FlowyAgentPanel({
   const { screenToFlowPosition, setCenter, getViewport } = useReactFlow();
   const workflowId = useWorkflowStore((s) => s.workflowId);
   const setFlowyAgentOpen = useWorkflowStore((s) => s.setFlowyAgentOpen);
+  const setFlowyHistoryHighlight = useWorkflowStore((s) => s.setFlowyHistoryHighlight);
+  /** ⋮ thread row submenu (Rename / Delete / Restore canvas) */
+  const [threadRowMenuSessionId, setThreadRowMenuSessionId] = useState<string | null>(null);
+  const threadActionsBtnRef = useRef<HTMLButtonElement | null>(null);
+  const threadActionsMenuPortalRef = useRef<HTMLDivElement | null>(null);
+  const [threadActionsMenuPos, setThreadActionsMenuPos] = useState<{ top: number; left: number } | null>(null);
   const storeUpdateNodeData = useWorkflowStore((s) => s.updateNodeData);
   const setNavigationTarget = useWorkflowStore((s) => s.setNavigationTarget);
   const sessionScopeId = workflowId || "global";
@@ -2338,6 +2384,14 @@ export function FlowyAgentPanel({
     return s?.title ?? null;
   }, [continuationSourceSessionId, sessions]);
 
+  const threadActionsForSession = useMemo(
+    () =>
+      threadRowMenuSessionId
+        ? sortedSessions.find((x) => x.id === threadRowMenuSessionId) ?? null
+        : null,
+    [sortedSessions, threadRowMenuSessionId]
+  );
+
   const switchToSession = useCallback(
     (id: string) => {
       stopAutoRun();
@@ -2348,13 +2402,8 @@ export function FlowyAgentPanel({
       setPendingExecuteNodeIds(null);
       resetExecution();
       setErrorMessage(null);
-      const sess = sessionsRef.current.find((s) => s.id === id);
-      const snap = findLastCanvasSnapshotInSession(sess);
-      if (snap && onRestoreFlowyCanvas) {
-        void Promise.resolve(onRestoreFlowyCanvas(snap)).catch(() => {});
-      }
     },
-    [onRestoreFlowyCanvas, resetExecution, resetPendingUiCommands, stopAutoRun]
+    [resetExecution, resetPendingUiCommands, stopAutoRun]
   );
 
   const handleRenameSession = useCallback(
@@ -2379,6 +2428,10 @@ export function FlowyAgentPanel({
       const ok = window.confirm(`Delete chat "${target.title}"?`);
       if (!ok) return;
 
+      if (useWorkflowStore.getState().flowyHistoryHighlightSessionId === sessionId) {
+        useWorkflowStore.getState().setFlowyHistoryHighlight(null);
+      }
+
       stopAutoRun();
       setPendingOperations(null);
       resetPendingUiCommands();
@@ -2402,6 +2455,69 @@ export function FlowyAgentPanel({
     },
     [activeSessionId, createSession, resetExecution, resetPendingUiCommands, sessions, stopAutoRun]
   );
+
+  const handleRestoreThreadCanvas = useCallback(
+    (sessionId: string) => {
+      const sess = sessions.find((x) => x.id === sessionId);
+      const snap = findLastCanvasSnapshotInSession(sess);
+      if (!snap || !onRestoreFlowyCanvas) return;
+      void Promise.resolve(onRestoreFlowyCanvas(snap)).catch(() => {});
+      setThreadRowMenuSessionId(null);
+    },
+    [sessions, onRestoreFlowyCanvas]
+  );
+
+  const THREAD_ACTIONS_MENU_W = 220;
+  const THREAD_ACTIONS_MENU_EST_H = 168;
+
+  const updateThreadActionsMenuPosition = useCallback(() => {
+    if (!threadRowMenuSessionId) {
+      setThreadActionsMenuPos(null);
+      return;
+    }
+    const btn = threadActionsBtnRef.current;
+    if (!btn) {
+      setThreadActionsMenuPos(null);
+      return;
+    }
+    const r = btn.getBoundingClientRect();
+    let top = r.bottom + 6;
+    const left = Math.min(
+      Math.max(8, r.right - THREAD_ACTIONS_MENU_W),
+      window.innerWidth - THREAD_ACTIONS_MENU_W - 8
+    );
+    if (top + THREAD_ACTIONS_MENU_EST_H > window.innerHeight - 8) {
+      top = Math.max(8, r.top - THREAD_ACTIONS_MENU_EST_H - 6);
+    }
+    setThreadActionsMenuPos({ top, left });
+  }, [threadRowMenuSessionId]);
+
+  useLayoutEffect(() => {
+    updateThreadActionsMenuPosition();
+  }, [updateThreadActionsMenuPosition]);
+
+  useEffect(() => {
+    if (!threadRowMenuSessionId) return;
+    updateThreadActionsMenuPosition();
+    window.addEventListener("scroll", updateThreadActionsMenuPosition, true);
+    window.addEventListener("resize", updateThreadActionsMenuPosition);
+    return () => {
+      window.removeEventListener("scroll", updateThreadActionsMenuPosition, true);
+      window.removeEventListener("resize", updateThreadActionsMenuPosition);
+    };
+  }, [threadRowMenuSessionId, updateThreadActionsMenuPosition]);
+
+  useEffect(() => {
+    if (!threadRowMenuSessionId) return;
+    const onPointerDownCapture = (e: PointerEvent) => {
+      const t = e.target as Node;
+      if (threadActionsMenuPortalRef.current?.contains(t)) return;
+      if (threadActionsBtnRef.current?.contains(t)) return;
+      setThreadRowMenuSessionId(null);
+    };
+    document.addEventListener("pointerdown", onPointerDownCapture, true);
+    return () => document.removeEventListener("pointerdown", onPointerDownCapture, true);
+  }, [threadRowMenuSessionId]);
 
   const setFlowyHistoryRailOpen = useWorkflowStore((s) => s.setFlowyHistoryRailOpen);
 
@@ -2513,12 +2629,17 @@ export function FlowyAgentPanel({
     const onPointerDown = (e: PointerEvent) => {
       const node = e.target as Node;
       if (threadsMenuRef.current?.contains(node)) return;
+      if (threadActionsMenuPortalRef.current?.contains(node)) return;
       if (agentLogAnchorRef?.current?.contains(node)) return;
       setFlowyHistoryRailOpen(false);
     };
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [isOpen, historyRailOpen, agentLogAnchorRef, setFlowyHistoryRailOpen]);
+
+  useEffect(() => {
+    if (!isOpen || !historyRailOpen) setThreadRowMenuSessionId(null);
+  }, [isOpen, historyRailOpen]);
 
   const styleMemorySummary = useMemo(() => {
     if (!styleMemory) {
@@ -2695,11 +2816,22 @@ export function FlowyAgentPanel({
                           type="button"
                           role="menuitem"
                           onClick={() => {
+                            setThreadRowMenuSessionId(null);
                             if (continuationSourceSessionId === s.id) {
                               setContinuationSourceSessionId(null);
+                              setFlowyHistoryHighlight(null);
                             } else {
                               setContinuationSourceSessionId(s.id);
                               switchToSession(s.id);
+                              const snap = findLastCanvasSnapshotInSession(s);
+                              if (snap?.nodes?.length) {
+                                setFlowyHistoryHighlight({
+                                  sessionId: s.id,
+                                  nodeIds: new Set(snap.nodes.map((n) => n.id)),
+                                });
+                              } else {
+                                setFlowyHistoryHighlight(null);
+                              }
                             }
                           }}
                           className={`flex min-w-0 flex-1 cursor-pointer items-center gap-2 overflow-hidden rounded-full py-1.5 pl-3 pr-2 text-left text-sm outline-none transition-colors focus-visible:ring-2 focus-visible:ring-white/25 ${rowHighlight}`}
@@ -2708,7 +2840,7 @@ export function FlowyAgentPanel({
                           title={
                             isContinuationSource
                               ? "Click again to stop attaching this thread’s history to your next message"
-                              : "Select thread — its history will attach to your next composer send"
+                              : "Select thread — highlights its snapshot nodes on the canvas; history attaches to your next send"
                           }
                         >
                           <div className="flex h-3 w-3 shrink-0 items-center justify-center opacity-50">
@@ -2726,30 +2858,24 @@ export function FlowyAgentPanel({
                           </div>
                           <span className="min-w-0 flex-1 truncate">{s.title}</span>
                         </button>
-                        <div className="flex shrink-0 gap-0.5 pr-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
+                        <div className="relative shrink-0 pr-1 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                           <button
+                            ref={threadRowMenuSessionId === s.id ? threadActionsBtnRef : undefined}
                             type="button"
+                            className="rounded-full p-1.5 text-neutral-500 hover:bg-white/10 hover:text-neutral-200"
+                            title="Thread actions"
+                            aria-label={`Thread actions for ${s.title}`}
+                            aria-expanded={threadRowMenuSessionId === s.id}
+                            aria-haspopup="menu"
+                            aria-controls={
+                              threadRowMenuSessionId === s.id ? "flowy-thread-actions-menu" : undefined
+                            }
                             onClick={(e) => {
                               e.stopPropagation();
-                              handleRenameSession(s.id);
+                              setThreadRowMenuSessionId((prev) => (prev === s.id ? null : s.id));
                             }}
-                            className="rounded-full px-1.5 py-1 text-[10px] font-medium text-neutral-500 hover:bg-white/10 hover:text-neutral-200"
-                            title="Rename thread"
-                            aria-label={`Rename ${s.title}`}
                           >
-                            Ren
-                          </button>
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleDeleteSession(s.id);
-                            }}
-                            className="rounded-full px-1.5 py-1 text-[10px] font-medium text-rose-400/80 hover:bg-rose-500/15 hover:text-rose-200"
-                            title="Delete thread"
-                            aria-label={`Delete ${s.title}`}
-                          >
-                            Del
+                            <MoreHorizontal className="size-4" strokeWidth={2} aria-hidden />
                           </button>
                         </div>
                       </div>
@@ -2757,6 +2883,65 @@ export function FlowyAgentPanel({
                   })
                 )}
               </div>
+            </div>,
+            document.body
+          )
+        : null}
+      {isOpen &&
+      historyRailOpen &&
+      threadRowMenuSessionId &&
+      threadActionsMenuPos &&
+      threadActionsForSession &&
+      typeof document !== "undefined"
+        ? createPortal(
+            <div
+              ref={threadActionsMenuPortalRef}
+              id="flowy-thread-actions-menu"
+              role="menu"
+              aria-label={`Actions for ${threadActionsForSession.title}`}
+              className="pointer-events-auto min-w-[220px] rounded-xl border border-white/[0.12] bg-[rgb(22,23,24)]/98 py-1 shadow-[0_8px_32px_-14px_rgba(0,0,0,0.55)] backdrop-blur-xl"
+              style={{
+                position: "fixed",
+                top: threadActionsMenuPos.top,
+                left: threadActionsMenuPos.left,
+                width: THREAD_ACTIONS_MENU_W,
+                zIndex: 140,
+              }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center px-3 py-2 text-left text-sm text-neutral-200 hover:bg-white/10"
+                onClick={() => {
+                  handleRenameSession(threadActionsForSession.id);
+                  setThreadRowMenuSessionId(null);
+                }}
+              >
+                Rename
+              </button>
+              {findLastCanvasSnapshotInSession(threadActionsForSession) && onRestoreFlowyCanvas ? (
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-sky-300/95 hover:bg-white/10"
+                  onClick={() => handleRestoreThreadCanvas(threadActionsForSession.id)}
+                >
+                  <History className="size-3.5 shrink-0" strokeWidth={2} aria-hidden />
+                  Restore canvas to here
+                </button>
+              ) : null}
+              <button
+                type="button"
+                role="menuitem"
+                className="flex w-full items-center px-3 py-2 text-left text-sm text-rose-300/95 hover:bg-rose-500/15"
+                onClick={() => {
+                  handleDeleteSession(threadActionsForSession.id);
+                  setThreadRowMenuSessionId(null);
+                }}
+              >
+                Delete
+              </button>
             </div>,
             document.body
           )
@@ -2895,23 +3080,27 @@ export function FlowyAgentPanel({
           </div>
         )}
 
-        {chatMessages.map((m) =>
-          m.role === "user" ? (
-            <FlowyUserMessageRow
-              key={m.id}
-              message={m}
-              renderMarkdown={renderChatMarkdown}
-              expanded={expandedUserMessageIds.has(m.id)}
-              onToggleExpand={() => {
-                setExpandedUserMessageIds((prev) => {
-                  const next = new Set(prev);
-                  if (next.has(m.id)) next.delete(m.id);
-                  else next.add(m.id);
-                  return next;
-                });
-              }}
-            />
-          ) : (
+        {chatMessages.map((m) => {
+          if (m.role === "user") {
+            return (
+              <FlowyUserMessageRow
+                key={m.id}
+                message={m}
+                renderMarkdown={renderChatMarkdown}
+                expanded={expandedUserMessageIds.has(m.id)}
+                onToggleExpand={() => {
+                  setExpandedUserMessageIds((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(m.id)) next.delete(m.id);
+                    else next.add(m.id);
+                    return next;
+                  });
+                }}
+              />
+            );
+          }
+          const restoreHere = getRestoreCanvasHandler(m.appliedPlan, onRestoreFlowyCanvas);
+          return (
             <div key={m.id} className="group/message flex w-full select-text flex-col gap-1.5 py-1">
               <div className="px-4">
                 <div className="max-w-[min(100%,26rem)] rounded-2xl rounded-tl-md border border-transparent bg-transparent px-3 py-2.5">
@@ -2923,11 +3112,14 @@ export function FlowyAgentPanel({
                 </div>
               </div>
               {m.appliedPlan && m.appliedPlan.operations.length > 0 && (
-                <AppliedPlanWidget plan={m.appliedPlan} />
+                <AppliedPlanWidget plan={m.appliedPlan} onRestoreCanvas={restoreHere} />
+              )}
+              {m.appliedPlan && m.appliedPlan.operations.length === 0 && restoreHere && (
+                <RestoreCanvasToHereButton onClick={restoreHere} className="mx-5 mt-1.5 w-fit" />
               )}
             </div>
-          )
-        )}
+          );
+        })}
 
         {(isPlanning ||
           plannerStageEvent != null ||

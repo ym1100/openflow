@@ -179,8 +179,17 @@ const findScrollableAncestor = (target: HTMLElement, deltaX: number, deltaY: num
 };
 
 export function WorkflowCanvas() {
-  const { nodes, edges, groups, isModalOpen, navigationTarget, canvasNavigationSettings, dimmedNodeIds } =
-    useWorkflowStore(useShallow((state) => ({
+  const {
+    nodes,
+    edges,
+    groups,
+    isModalOpen,
+    navigationTarget,
+    canvasNavigationSettings,
+    dimmedNodeIds,
+    flowyHistoryHighlightNodeIds,
+  } = useWorkflowStore(
+    useShallow((state) => ({
       nodes: state.nodes,
       edges: state.edges,
       groups: state.groups,
@@ -188,7 +197,9 @@ export function WorkflowCanvas() {
       navigationTarget: state.navigationTarget,
       canvasNavigationSettings: state.canvasNavigationSettings,
       dimmedNodeIds: state.dimmedNodeIds,
-    })));
+      flowyHistoryHighlightNodeIds: state.flowyHistoryHighlightNodeIds,
+    }))
+  );
   const onNodesChange = useWorkflowStore((state) => state.onNodesChange);
   const onEdgesChange = useWorkflowStore((state) => state.onEdgesChange);
   const onConnect = useWorkflowStore((state) => state.onConnect);
@@ -275,24 +286,28 @@ export function WorkflowCanvas() {
   // Apply dimming className to nodes downstream of disabled Switch outputs
   const allNodes = useMemo(() => {
     return nodes.map((node) => {
-      // Never dim Switch or ConditionalSwitch nodes themselves
-      if (node.type === "switch" || node.type === "conditionalSwitch") return node;
-
-      const isDimmed = dimmedNodeIds.has(node.id);
+      const isSwitchType = node.type === "switch" || node.type === "conditionalSwitch";
+      // Never dim Switch or ConditionalSwitch nodes themselves (downstream dimming only)
+      const isDimmed = !isSwitchType && dimmedNodeIds.has(node.id);
       const dimClass = isDimmed ? "switch-dimmed" : "";
+      const isFlowyHistoryHighlight = flowyHistoryHighlightNodeIds.has(node.id);
+      const historyClass = isFlowyHistoryHighlight ? "flowy-history-highlight" : "";
 
-      // Preserve existing className if any, add/remove dimmed class.
+      // Preserve existing className if any, add/remove dimmed / Flowy history classes.
       // Normalize empty className to `undefined` to avoid churn (`""` vs `undefined`)
       // which can cause React Flow store update loops.
-      const baseClass = (node.className ?? "").replace(/\bswitch-dimmed\b/g, "").trim();
-      const mergedClass = dimClass ? `${baseClass} ${dimClass}`.trim() : baseClass;
+      const baseClass = (node.className ?? "")
+        .replace(/\bswitch-dimmed\b/g, "")
+        .replace(/\bflowy-history-highlight\b/g, "")
+        .trim();
+      const mergedClass = [baseClass, dimClass, historyClass].filter(Boolean).join(" ").trim();
       const normalizedClassName = mergedClass.length > 0 ? mergedClass : undefined;
 
       // Only create a new node object if className truly changed.
       if (node.className === normalizedClassName) return node;
       return { ...node, className: normalizedClassName };
     });
-  }, [nodes, dimmedNodeIds]);
+  }, [nodes, dimmedNodeIds, flowyHistoryHighlightNodeIds]);
 
   const defaultEdgeOptions = useMemo(
     () => ({ type: "editable" as const, animated: false }),

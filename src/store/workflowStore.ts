@@ -358,6 +358,13 @@ interface WorkflowStore {
   // Switch dimming actions
   recomputeDimmedNodes: () => void;
 
+  /** Flowy chat history: purple outline on canvas for the selected thread’s snapshot nodes */
+  flowyHistoryHighlightSessionId: string | null;
+  flowyHistoryHighlightNodeIds: Set<string>;
+  setFlowyHistoryHighlight: (
+    payload: { sessionId: string; nodeIds: Set<string> } | null
+  ) => void;
+
 }
 
 let nodeIdCounter = 0;
@@ -493,6 +500,23 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
 
   // Switch dimming initial state
   dimmedNodeIds: new Set<string>(),
+
+  flowyHistoryHighlightSessionId: null,
+  flowyHistoryHighlightNodeIds: new Set<string>(),
+
+  setFlowyHistoryHighlight: (payload) => {
+    if (payload == null) {
+      set({
+        flowyHistoryHighlightSessionId: null,
+        flowyHistoryHighlightNodeIds: new Set<string>(),
+      });
+      return;
+    }
+    set({
+      flowyHistoryHighlightSessionId: payload.sessionId,
+      flowyHistoryHighlightNodeIds: new Set(payload.nodeIds),
+    });
+  },
 
   setEdgeStyle: (style: EdgeStyle) => {
     set({ edgeStyle: style });
@@ -1870,6 +1894,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
             flowyAgentOpen: false,
             flowyHistoryRailOpen: false,
           }),
+      flowyHistoryHighlightSessionId: null,
+      flowyHistoryHighlightNodeIds: new Set<string>(),
     });
 
     // Clear snapshot unless explicitly preserving (e.g., AI workflow generation)
@@ -1906,6 +1932,8 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
       dimmedNodeIds: new Set<string>(),
       flowyAgentOpen: false,
       flowyHistoryRailOpen: false,
+      flowyHistoryHighlightSessionId: null,
+      flowyHistoryHighlightNodeIds: new Set<string>(),
     });
     get().clearSnapshot();
   },
@@ -2297,7 +2325,13 @@ const workflowStoreImpl: StateCreator<WorkflowStore> = (set, get) => ({
   setFlowyAgentOpen: (open: boolean) => {
     set({
       flowyAgentOpen: open,
-      ...(!open ? { flowyHistoryRailOpen: false } : {}),
+      ...(!open
+        ? {
+            flowyHistoryRailOpen: false,
+            flowyHistoryHighlightSessionId: null,
+            flowyHistoryHighlightNodeIds: new Set<string>(),
+          }
+        : {}),
     });
   },
   setFlowyHistoryRailOpen: (open: boolean) => {
